@@ -290,34 +290,53 @@ def append_detail_tables(
 
     Each section is a grid:
     columns = questions, rows = entries like "Player Name, (3★)" or "Player Name, (NO)".
+    Leftmost column is a counter (1, 2, 3, ...).
+    If there are no entries, we just write a single line:
+      - "0 1–3 star reviews"
+      - "0 no answers"
     """
     worksheet = writer.sheets[sheet_name]
 
     # 1–3 Star Reviews
     low_df = build_low_ratings_table(df, rating_indices, player_index)
     if low_df is not None:
-        worksheet.write(startrow, 0, "1–3 Star Reviews")
+        n_rows = len(low_df)
+        # Add counter column on the left
+        low_df.insert(0, "1–3 Star Reviews", list(range(1, n_rows + 1)))
+
         low_df.to_excel(
             writer,
             sheet_name=sheet_name,
-            startrow=startrow + 1,
+            startrow=startrow,
             startcol=0,
             index=False,
         )
-        startrow = startrow + 1 + low_df.shape[0] + 2  # table + 1 blank row
+        # move startrow below this table + one blank row
+        startrow = startrow + n_rows + 1 + 1  # header + rows + blank
+    else:
+        # No low-star reviews
+        worksheet.write(startrow, 0, "0 1–3 star reviews")
+        startrow = startrow + 2  # leave a blank row after the message
 
     # NO replies for Yes/No questions
     no_df = build_no_answers_table(df, yesno_indices, player_index)
     if no_df is not None:
-        worksheet.write(startrow, 0, "NO Replies")
+        n_rows = len(no_df)
+        # Add counter column on the left
+        no_df.insert(0, "NO Replies", list(range(1, n_rows + 1)))
+
         no_df.to_excel(
             writer,
             sheet_name=sheet_name,
-            startrow=startrow + 1,
+            startrow=startrow,
             startcol=0,
             index=False,
         )
-        # If we ever need, we could compute next startrow, but not necessary now.
+        # (We could bump startrow again if we ever want something below this.)
+    else:
+        worksheet.write(startrow, 0, "0 no answers")
+        # Optional: startrow += 2 if you ever add more below
+
 
 
 def process_workbook(input_path: str, output_path: str = None) -> str:
