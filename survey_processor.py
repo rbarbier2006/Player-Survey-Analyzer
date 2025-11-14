@@ -268,7 +268,7 @@ def build_no_answers_table(
     df: pd.DataFrame,
     yesno_indices,
     player_index,
-):
+) -> pd.DataFrame | None:
     """
     Build a table listing all 'NO' answers for Yes/No questions.
 
@@ -281,19 +281,20 @@ def build_no_answers_table(
     player_col = cols[player_index]
     yesno_cols = [cols[i] for i in yesno_indices if i < len(cols)]
 
-    no_lists = {}
+    no_lists: dict[str, list[str]] = {}
 
     for idx in yesno_indices:
         if idx >= len(cols):
             continue
         col = cols[idx]
-        entries = []
+        entries: list[str] = []
 
         for _, row in df.iterrows():
-            value = str(row.iloc[idx]).strip().str.upper()
-            # The .str part above doesn't work on a scalar, so simpler:
-            value = str(row.iloc[idx]).strip().upper()
-            if value == "NO":
+            value = row.iloc[idx]
+            if pd.isna(value):
+                continue
+            value_str = str(value).strip().upper()
+            if value_str == "NO":
                 name = str(row[player_col])
                 entries.append(f"{name}, (NO)")
 
@@ -313,6 +314,7 @@ def build_no_answers_table(
 
     no_df = pd.DataFrame(data)
     return no_df
+
 
 
 def append_detail_tables(
