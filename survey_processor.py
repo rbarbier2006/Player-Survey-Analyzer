@@ -6,11 +6,12 @@ import numpy as np
 import pandas as pd
 
 # Column layout based on your description
-# F: player name (not used directly here)
+# F: player name
 # G: team + category (grouping key)
 # H, I, J, K, L, P, Q: 1-5 star rating questions
 # M, N: Yes/No questions
 
+PLAYER_NAME_COL_LETTER = "F"
 RATING_COL_LETTERS = ["H", "I", "J", "K", "L", "P", "Q"]
 YESNO_COL_LETTERS = ["M", "N"]
 
@@ -32,7 +33,8 @@ def col_letter_to_index(col_letter: str) -> int:
     return index - 1
 
 
-# Precompute the indices we need
+# Precompute indices we need
+PLAYER_NAME_INDEX = col_letter_to_index(PLAYER_NAME_COL_LETTER)
 RATING_COL_INDICES = [col_letter_to_index(c) for c in RATING_COL_LETTERS]
 YESNO_COL_INDICES = [col_letter_to_index(c) for c in YESNO_COL_LETTERS]
 GROUP_COL_INDEX = col_letter_to_index("G")
@@ -71,19 +73,25 @@ def make_safe_sheet_name(raw_name: str, used_names=None) -> str:
     return name
 
 
-def append_summary_tables(df: pd.DataFrame,
-                          writer: pd.ExcelWriter,
-                          sheet_name: str,
-                          rating_indices,
-                          yesno_indices) -> None:
+def append_summary_tables(
+    df: pd.DataFrame,
+    writer: pd.ExcelWriter,
+    sheet_name: str,
+    rating_indices,
+    yesno_indices,
+) -> int:
     """
-    For the given DataFrame and sheet, append:
+    Append the "score table" summaries to a sheet:
+
     - ratings table (1..5 counts + average) for all rating columns
     - yes/no counts for all yes/no columns
 
     All tables start 3 blank rows after the last data row.
+
+    Returns:
+        next_startrow (int): first empty row AFTER all summary tables.
+        This is used so we can append more stuff below (part 2).
     """
-    # Number of player rows
     n_rows = df.shape[0]
 
     # 3 blank rows after header + data
@@ -115,7 +123,6 @@ def append_summary_tables(df: pd.DataFrame,
             else:
                 rating_summary.loc["Average", col] = np.nan
 
-        # Write the rating table
         rating_summary.to_excel(
             writer,
             sheet_name=sheet_name,
@@ -150,6 +157,168 @@ def append_summary_tables(df: pd.DataFrame,
             index_label="Response",
         )
 
+        table_height = yesno_summary.shape[0] + 1
+        startrow = startrow + table_height + 1
+
+    # Return the row after all summary tables (plus a blank row)
+    return startrow
+
+
+def build_low_ratings_table(
+    df: pd.DataFrame,
+    rating_indices,
+    player_index,
+) -> pd.DataFrame | None:
+    """
+    Build a table listing all 1, 2, and 3 star answers.
+
+    Each cell is "Player Name, (X★)" for the corresponding question.
+    Columns = rating questions; rows = entries, padded with empty strings.
+    """
+    cols = list(df.columns)
+    if player_index >= len(cols):
+        return None
+
+    player_col = cols[player_index]
+    rating_cols = [cols[i] for i in rating_indices if i < len(cols)]
+
+    low_lists: dict[str, list[str]] = {}
+
+    for idx in rating_indices:
+        if idx >= len(cols):
+            continue
+        col = cols[idx]
+        series = df.iloc[:, idx]
+        entries: list[str] = []
+
+        for _, row in df.iterrows():
+            value = row.iloc[idx]
+            if pd.isna(value):
+                continue
+            try:
+                rating = int(value)
+            except (ValueError, TypeError):
+                continue
+            if rating in (1, 2, 3):
+                name = str(row[player_col])
+                entries.append(f"{name}, ({rating}★)")
+
+        low_lists[col] = entries
+
+    if not low_lists:
+        return None
+
+    max_len = max((len(v) for v in low_lists.values()), default=0)
+    if max_len == 0:
+        return None
+
+    data = {}
+    for question, vals in low_lists.items():
+        padded = vals + [""] * (max_len - len(vals))
+        data[question] = padded
+
+    low_df = pd.DataFrame(data)
+    return low_df
+
+
+def build_no_answers_table(
+    df: pd.DataFrame,
+    yesno_indices,
+    player_index,
+) -> pd.DataFrame | None:
+    """
+    Build a table listing all 'NO' answers for Yes/No questions.
+
+    Each cell is "Player Name, (NO)" for the corresponding question.
+    """
+    cols = list(df.columns)
+    if player_index >= len(cols):
+        return None
+
+    player_col = cols[player_index]
+    yesno_cols = [cols[i] for i in yesno_indices if i < len(cols)]
+
+    no_lists: dict[str, list[str]] = {}
+
+    for idx in yesno_indices:
+        if idx >= len(cols):
+            continue
+        col = cols[idx]
+        series = df.iloc[:, idx].astype(str).str.strip().str.upper()
+        entries: list[str] = []
+
+        for _, row in df.iterrows():
+            value = str(row.iloc[idx]).strip().upper()
+            if value == "NO":
+                name = str(row[player_col])
+                entries.append(f"{name}, (NO)")
+
+        no_lists[col] = entries
+
+    if not no_lists:
+        return None
+
+    max_len = max((len(v) for v in no_lists.values()), default=0)
+    if max_len == 0:
+        return None
+
+    data = {}
+    for question, vals in no_lists.items():
+        padded = vals + [""] * (max_len - len(vals))
+        data[question] = padded
+
+    no_df = pd.DataFrame(data)
+    return no_df
+
+
+def append_detail_tables(
+    df: pd.DataFrame,
+    writer: pd.ExcelWriter,
+    sheet_name: str,
+    startrow: int,
+    rating_indices,
+    yesno_indices,
+    player_index,
+) -> None:
+    """
+    Part 2:
+
+    Under the score tables, append:
+
+    - A "1–3 Star Reviews" section listing all players who gave 1, 2, or 3 stars.
+    - A "NO Replies" section listing all players who answered "NO" to Yes/No questions.
+
+    Each section is a grid:
+    columns = questions, rows = entries like "Player Name, (3★)" or "Player Name, (NO)".
+    """
+    worksheet = writer.sheets[sheet_name]
+
+    # 1–3 Star Reviews
+    low_df = build_low_ratings_table(df, rating_indices, player_index)
+    if low_df is not None:
+        worksheet.write(startrow, 0, "1–3 Star Reviews")
+        low_df.to_excel(
+            writer,
+            sheet_name=sheet_name,
+            startrow=startrow + 1,
+            startcol=0,
+            index=False,
+        )
+        startrow = startrow + 1 + low_df.shape[0] + 2  # table + 1 blank row
+
+    # NO replies for Yes/No questions
+    no_df = build_no_answers_table(df, yesno_indices, player_index)
+    if no_df is not None:
+        worksheet.write(startrow, 0, "NO Replies")
+        no_df.to_excel(
+            writer,
+            sheet_name=sheet_name,
+            startrow=startrow + 1,
+            startcol=0,
+            index=False,
+        )
+        # If we ever need, we could compute next startrow, but not necessary now.
+
 
 def process_workbook(input_path: str, output_path: str = None) -> str:
     """
@@ -160,8 +329,10 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
     - Creates an output workbook with:
       - Sheet 1: All data
       - One sheet per group (team + category).
-    - On every sheet, appends the rating and yes/no summary tables
-      starting 3 blank rows after the last data row.
+    - On every sheet, appends:
+      - rating and yes/no summary tables (part 1)
+      - "1–3 star reviews" names
+      - "NO replies" names
 
     Returns the path to the output workbook.
     """
@@ -190,21 +361,43 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
         # Sheet 1: full data
         all_sheet_name = make_safe_sheet_name("All_Data", used_sheet_names)
         df.to_excel(writer, sheet_name=all_sheet_name, index=False)
-        append_summary_tables(df,
-                              writer,
-                              all_sheet_name,
-                              RATING_COL_INDICES,
-                              YESNO_COL_INDICES)
+        next_row = append_summary_tables(
+            df,
+            writer,
+            all_sheet_name,
+            RATING_COL_INDICES,
+            YESNO_COL_INDICES,
+        )
+        append_detail_tables(
+            df,
+            writer,
+            all_sheet_name,
+            next_row,
+            RATING_COL_INDICES,
+            YESNO_COL_INDICES,
+            PLAYER_NAME_INDEX,
+        )
 
         # One sheet per group
         groups = df.groupby(group_col_name, sort=True)
         for group_value, group_df in groups:
             sheet_name = make_safe_sheet_name(str(group_value), used_sheet_names)
             group_df.to_excel(writer, sheet_name=sheet_name, index=False)
-            append_summary_tables(group_df,
-                                  writer,
-                                  sheet_name,
-                                  RATING_COL_INDICES,
-                                  YESNO_COL_INDICES)
+            next_row = append_summary_tables(
+                group_df,
+                writer,
+                sheet_name,
+                RATING_COL_INDICES,
+                YESNO_COL_INDICES,
+            )
+            append_detail_tables(
+                group_df,
+                writer,
+                sheet_name,
+                next_row,
+                RATING_COL_INDICES,
+                YESNO_COL_INDICES,
+                PLAYER_NAME_INDEX,
+            )
 
     return output_path
