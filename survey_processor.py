@@ -428,14 +428,25 @@ def append_charts(
                 }
             )
 
+            # Build title text with average if available
             avg = q.get("average")
             if avg is not None and not np.isnan(avg):
-                chart.set_title({"name": f"{q['name']} (Avg = {avg:.2f})"})
+                title_text = f"{q['name']} (Avg = {avg:.2f})"
             else:
-                chart.set_title({"name": q["name"]})
+                title_text = q["name"]
 
+            # Smaller title font and no legend
+            chart.set_title(
+                {
+                    "name": title_text,
+                    "name_font": {"size": 12, "bold": True},
+                }
+            )
+            chart.set_legend({"none": True})
+
+            # Axis labels
             chart.set_x_axis({"name": "# of Stars"})
-            chart.set_y_axis({"name": "Count of Survey Members"})
+            chart.set_y_axis({"name": "Player Count"})
 
             worksheet.insert_chart(row, col, chart)
 
@@ -448,7 +459,7 @@ def append_charts(
         row += 18
         startrow_bottom = row
 
-    # Yes/No pie charts
+    # Yes/No pie charts (keep legend + percentages)
     if yesno_info is not None and yesno_info.get("questions"):
         y_start = yesno_info["startrow"]
         cat_first_row = y_start + 1
@@ -480,6 +491,7 @@ def append_charts(
             if col > 16:
                 col = 0
                 row += 18
+
 
 
 def process_workbook(input_path: str, output_path: str = None) -> str:
