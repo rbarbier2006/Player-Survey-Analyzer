@@ -10,7 +10,7 @@ import pandas as pd
 # G: team + category (grouping key)
 # H, I, J, K, L, P, Q: 1-5 star rating questions
 # M, N: Yes/No questions
-# O: single-choice question with 5 options
+# O: single-choice "values" question
 
 PLAYER_NAME_COL_LETTER = "F"
 RATING_COL_LETTERS = ["H", "I", "J", "K", "L", "P", "Q"]
@@ -227,7 +227,6 @@ def build_low_ratings_table(
         return None
 
     player_col = cols[player_index]
-    rating_cols = [cols[i] for i in rating_indices if i < len(cols)]
 
     low_lists = {}
 
@@ -282,7 +281,6 @@ def build_no_answers_table(
         return None
 
     player_col = cols[player_index]
-    yesno_cols = [cols[i] for i in yesno_indices if i < len(cols)]
 
     no_lists: dict[str, list[str]] = {}
 
@@ -427,7 +425,7 @@ def append_charts(
     - Pie charts for each Yes/No question, using the YES/NO summary table
       with labels "percentage, count".
     - A pie chart for the single-choice question in column O, also with
-      "percentage, count" labels and no visible helper table.
+      "percentage, count" labels and the visible Choice/Count table.
     """
     workbook = writer.book
     worksheet = writer.sheets[sheet_name]
@@ -527,29 +525,18 @@ def append_charts(
 
         row += 18  # space before the column-O pie
 
-    # Single-choice column O pie (percent + count, no visible table)
+    # Single-choice column O pie (percent + count, WITH visible table)
     choice_df = build_choice_counts(df, CHOICE_COL_INDEX)
     if choice_df is not None:
-        # Put helper table in hidden columns far to the right (e.g., column Z/AA)
-        hidden_col_start = 25  # 0-based index: 25 -> column Z
-        table_startrow = 0
-        table_startcol = hidden_col_start
-
+        # Write the frequency table for column O
+        table_startrow = row
+        table_startcol = 0
         choice_df.to_excel(
             writer,
             sheet_name=sheet_name,
             startrow=table_startrow,
             startcol=table_startcol,
             index=False,
-        )
-
-        # Hide the helper columns so the user doesn't see the table
-        worksheet.set_column(
-            table_startcol,
-            table_startcol + 1,
-            None,
-            None,
-            {"hidden": True},
         )
 
         chart = workbook.add_chart({"type": "pie"})
@@ -581,9 +568,8 @@ def append_charts(
         )
 
         chart.set_title({"name": choice_col_name})
-        # Place the chart at the bottom area (no visible table nearby)
-        worksheet.insert_chart(row, 0, chart)
-
+        # Place chart a few columns to the right of the table
+        worksheet.insert_chart(table_startrow, table_startcol + 4, chart)
 
 
 def process_workbook(input_path: str, output_path: str = None) -> str:
