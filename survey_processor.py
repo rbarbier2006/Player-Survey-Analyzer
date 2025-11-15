@@ -10,10 +10,12 @@ import pandas as pd
 # G: team + category (grouping key)
 # H, I, J, K, L, P, Q: 1-5 star rating questions
 # M, N: Yes/No questions
+# O: single-choice question with 5 options
 
 PLAYER_NAME_COL_LETTER = "F"
 RATING_COL_LETTERS = ["H", "I", "J", "K", "L", "P", "Q"]
 YESNO_COL_LETTERS = ["M", "N"]
+CHOICE_COL_LETTER = "O"
 
 
 def col_letter_to_index(col_letter: str) -> int:
@@ -37,6 +39,7 @@ def col_letter_to_index(col_letter: str) -> int:
 PLAYER_NAME_INDEX = col_letter_to_index(PLAYER_NAME_COL_LETTER)
 RATING_COL_INDICES = [col_letter_to_index(c) for c in RATING_COL_LETTERS]
 YESNO_COL_INDICES = [col_letter_to_index(c) for c in YESNO_COL_LETTERS]
+CHOICE_COL_INDEX = col_letter_to_index(CHOICE_COL_LETTER)
 GROUP_COL_INDEX = col_letter_to_index("G")
 
 
@@ -316,6 +319,28 @@ def build_no_answers_table(
     return no_df
 
 
+def build_choice_counts(
+    df: pd.DataFrame,
+    choice_index: int,
+) -> pd.DataFrame | None:
+    """
+    Build a frequency table for the single-choice question (column O).
+
+    Returns a DataFrame with columns ["Choice", "Count"] or None if empty.
+    """
+    if choice_index >= len(df.columns):
+        return None
+
+    series = df.iloc[:, choice_index].dropna()
+    if series.empty:
+        return None
+
+    counts = series.value_counts().sort_index()
+    table_df = pd.DataFrame(
+        {"Choice": counts.index.tolist(), "Count": counts.values.tolist()}
+    )
+    return table_df
+
 
 def append_detail_tables(
     df: pd.DataFrame,
@@ -392,13 +417,17 @@ def append_charts(
     rating_info,
     yesno_info,
     startrow_bottom: int,
+    df: pd.DataFrame,
 ) -> None:
     """
     Part 3:
 
     At the very bottom of the sheet, create:
     - Column charts (histograms) for each rating question, using the summary table.
-    - Pie charts for each Yes/No question, using the YES/NO summary table.
+    - Pie charts for each Yes/No question, using the YES/NO summary table
+      with labels "percentage, count".
+    - A pie chart for the single-choice question in column O, also with
+      "percentage, count" labels.
     """
     workbook = writer.book
     worksheet = writer.sheets[sheet_name]
@@ -459,7 +488,7 @@ def append_charts(
         row += 18
         startrow_bottom = row
 
-    # Yes/No pie charts (keep legend + percentages)
+    # Yes/No pie charts (percent + count)
     if yesno_info is not None and yesno_info.get("questions"):
         y_start = yesno_info["startrow"]
         cat_first_row = y_start + 1
@@ -480,7 +509,11 @@ def append_charts(
                                    cat_last_row, cat_col],
                     "values": [sheet_name, cat_first_row, val_col,
                                cat_last_row, val_col],
-                    "data_labels": {"percentage": True},
+                    "data_labels": {
+                        "percentage": True,
+                        "value": True,
+                        "separator": ", ",
+                    },
                 }
             )
 
@@ -492,6 +525,53 @@ def append_charts(
                 col = 0
                 row += 18
 
+        row += 18  # space before the column-O pie
+
+    # Single-choice column O pie (percent + count)
+    choice_df = build_choice_counts(df, CHOICE_COL_INDEX)
+    if choice_df is not None:
+        # Write the frequency table for column O
+        table_startrow = row
+        table_startcol = 0
+        choice_df.to_excel(
+            writer,
+            sheet_name=sheet_name,
+            startrow=table_startrow,
+            startcol=table_startcol,
+            index=False,
+        )
+
+        chart = workbook.add_chart({"type": "pie"})
+        choice_col_name = df.columns[CHOICE_COL_INDEX]
+
+        chart.add_series(
+            {
+                "name": choice_col_name,
+                "categories": [
+                    sheet_name,
+                    table_startrow + 1,
+                    table_startcol,      # "Choice"
+                    table_startrow + len(choice_df),
+                    table_startcol,
+                ],
+                "values": [
+                    sheet_name,
+                    table_startrow + 1,
+                    table_startcol + 1,  # "Count"
+                    table_startrow + len(choice_df),
+                    table_startcol + 1,
+                ],
+                "data_labels": {
+                    "percentage": True,
+                    "value": True,
+                    "separator": ", ",
+                },
+            }
+        )
+
+        chart.set_title({"name": choice_col_name})
+        # Place chart a few columns to the right of the table
+        worksheet.insert_chart(table_startrow, table_startcol + 4, chart)
 
 
 def process_workbook(input_path: str, output_path: str = None) -> str:
@@ -508,6 +588,7 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
       - "1-3 star reviews" names
       - "NO replies" names
       - column and pie charts at the very bottom (part 3)
+      - plus a pie for the column O choice question.
 
     Returns the path to the output workbook.
     """
@@ -552,7 +633,14 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
             YESNO_COL_INDICES,
             PLAYER_NAME_INDEX,
         )
-        append_charts(writer, all_sheet_name, rating_info, yesno_info, next_row)
+        append_charts(
+            writer,
+            all_sheet_name,
+            rating_info,
+            yesno_info,
+            next_row,
+            df,
+        )
 
         # One sheet per group
         groups = df.groupby(group_col_name, sort=True)
@@ -575,6 +663,13 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
                 YESNO_COL_INDICES,
                 PLAYER_NAME_INDEX,
             )
-            append_charts(writer, sheet_name, rating_info, yesno_info, next_row)
+            append_charts(
+                writer,
+                sheet_name,
+                rating_info,
+                yesno_info,
+                next_row,
+                group_df,
+            )
 
     return output_path
