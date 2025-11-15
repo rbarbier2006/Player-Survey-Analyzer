@@ -427,7 +427,7 @@ def append_charts(
     - Pie charts for each Yes/No question, using the YES/NO summary table
       with labels "percentage, count".
     - A pie chart for the single-choice question in column O, also with
-      "percentage, count" labels.
+      "percentage, count" labels and no visible helper table.
     """
     workbook = writer.book
     worksheet = writer.sheets[sheet_name]
@@ -527,18 +527,29 @@ def append_charts(
 
         row += 18  # space before the column-O pie
 
-    # Single-choice column O pie (percent + count)
+    # Single-choice column O pie (percent + count, no visible table)
     choice_df = build_choice_counts(df, CHOICE_COL_INDEX)
     if choice_df is not None:
-        # Write the frequency table for column O
-        table_startrow = row
-        table_startcol = 0
+        # Put helper table in hidden columns far to the right (e.g., column Z/AA)
+        hidden_col_start = 25  # 0-based index: 25 -> column Z
+        table_startrow = 0
+        table_startcol = hidden_col_start
+
         choice_df.to_excel(
             writer,
             sheet_name=sheet_name,
             startrow=table_startrow,
             startcol=table_startcol,
             index=False,
+        )
+
+        # Hide the helper columns so the user doesn't see the table
+        worksheet.set_column(
+            table_startcol,
+            table_startcol + 1,
+            None,
+            None,
+            {"hidden": True},
         )
 
         chart = workbook.add_chart({"type": "pie"})
@@ -570,8 +581,9 @@ def append_charts(
         )
 
         chart.set_title({"name": choice_col_name})
-        # Place chart a few columns to the right of the table
-        worksheet.insert_chart(table_startrow, table_startcol + 4, chart)
+        # Place the chart at the bottom area (no visible table nearby)
+        worksheet.insert_chart(row, 0, chart)
+
 
 
 def process_workbook(input_path: str, output_path: str = None) -> str:
