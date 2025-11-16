@@ -980,12 +980,14 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
 
     comments_df = pd.DataFrame(rows, columns=["Player", "Comment / Suggestion"])
 
-    # Wrap long comments to avoid horizontal overlap in table cells
+    # Wrap long comments to avoid horizontal overlap in table cells.
+    # Narrower width => more line breaks, easier to fit in the box.
     comments_df["Comment / Suggestion"] = comments_df[
         "Comment / Suggestion"
-    ].apply(lambda s: textwrap.fill(str(s), width=70))
+    ].apply(lambda s: textwrap.fill(str(s), width=55))
 
     return comments_df
+
 
 
 def _add_group_tables_page_to_pdf(
@@ -1045,7 +1047,7 @@ def _add_group_tables_page_to_pdf(
                     rename_cols2[col] = str(num)
             no_df = no_df.rename(columns=rename_cols2)
 
-    # ----- Players / completion / comments -----
+    # ----- Players / completion / comments ----- 
     players_df: Optional[pd.DataFrame] = None
     completion_df: Optional[pd.DataFrame] = None
     comments_df: Optional[pd.DataFrame] = None
@@ -1079,7 +1081,7 @@ def _add_group_tables_page_to_pdf(
     ):
         return
 
-    # ----- Decide sections and relative heights -----
+    # ----- Decide sections and relative heights ----- 
     sections: List[str] = []
     if low_df is not None:
         sections.append("low")
@@ -1099,7 +1101,7 @@ def _add_group_tables_page_to_pdf(
     height_ratios: List[float] = []
     for s in sections:
         if s == "low":
-            height_ratios.append(1.1)
+            height_ratios.append(1.2)
         elif s == "no":
             height_ratios.append(0.9)
         elif s == "completion":
@@ -1107,7 +1109,7 @@ def _add_group_tables_page_to_pdf(
         elif s == "players":
             height_ratios.append(1.3)
         elif s == "comments":
-            height_ratios.append(1.6)
+            height_ratios.append(1.8)
 
     fig, axes = plt.subplots(
         nrows=nrows,
@@ -1120,7 +1122,7 @@ def _add_group_tables_page_to_pdf(
 
     row_idx = 0
 
-    # --------- 1–3 Star Reviews ----------
+    # --------- 1–3 Star Reviews ---------- 
     if low_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -1131,16 +1133,12 @@ def _add_group_tables_page_to_pdf(
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(8)
+        table.set_fontsize(9)
 
         ncols_low = len(low_df.columns)
-        if ncols_low <= 8:
-            width_scale = 1.0
-        elif ncols_low <= 12:
-            width_scale = 0.85
-        else:
-            width_scale = 0.7
-        table.scale(width_scale, 1.3)
+        # Keep columns reasonably wide; only shrink if there are a lot of them
+        width_scale = min(1.0, 8.0 / max(ncols_low, 1))
+        table.scale(width_scale, 1.6)  # taller rows to avoid overlap
 
         ax.set_title(
             "1–3 Star Reviews (columns = chart numbers)",
@@ -1149,7 +1147,7 @@ def _add_group_tables_page_to_pdf(
         )
         row_idx += 1
 
-    # --------- "NO" Replies ----------
+    # --------- "NO" Replies ---------- 
     if no_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -1160,16 +1158,11 @@ def _add_group_tables_page_to_pdf(
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(8)
+        table.set_fontsize(9)
 
         ncols_no = len(no_df.columns)
-        if ncols_no <= 6:
-            width_scale = 1.0
-        elif ncols_no <= 10:
-            width_scale = 0.9
-        else:
-            width_scale = 0.75
-        table.scale(width_scale, 1.3)
+        width_scale = min(1.0, 8.0 / max(ncols_no, 1))
+        table.scale(width_scale, 1.6)
 
         ax.set_title(
             '"NO" Replies (columns = chart numbers)',
@@ -1178,7 +1171,7 @@ def _add_group_tables_page_to_pdf(
         )
         row_idx += 1
 
-    # --------- Completion summary (All Teams only) ----------
+    # --------- Completion summary (All Teams only) ---------- 
     if is_all_teams and completion_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -1199,7 +1192,7 @@ def _add_group_tables_page_to_pdf(
         )
         row_idx += 1
 
-    # --------- Players who completed this survey (team pages) ----------
+    # --------- Players who completed this survey (team pages) ---------- 
     if not is_all_teams and players_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -1211,7 +1204,7 @@ def _add_group_tables_page_to_pdf(
         )
         table.auto_set_font_size(False)
         table.set_fontsize(9)
-        table.scale(1.0, 1.5)
+        table.scale(1.05, 1.7)   # slightly wider and taller cells
 
         ax.set_title(
             "Players who completed this survey",
@@ -1220,7 +1213,7 @@ def _add_group_tables_page_to_pdf(
         )
         row_idx += 1
 
-    # --------- Comments / Suggestions (team pages) ----------
+    # --------- Comments / Suggestions (team pages) ---------- 
     if not is_all_teams and comments_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -1231,9 +1224,17 @@ def _add_group_tables_page_to_pdf(
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(8)
-        # Slightly narrower columns, taller rows for readability
-        table.scale(1.0, 1.6)
+        table.set_fontsize(7)
+
+        # Dynamic vertical scale based on longest wrapped comment
+        max_lines = comments_df["Comment / Suggestion"].apply(
+            lambda s: len(str(s).splitlines())
+        ).max()
+        if pd.isna(max_lines):
+            max_lines = 1
+        # More lines => taller rows so text stays inside the cell
+        y_scale = 1.0 + 0.4 * max_lines
+        table.scale(1.05, y_scale)
 
         ax.set_title(
             "Comments and Suggestions",
