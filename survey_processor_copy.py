@@ -927,37 +927,98 @@ def _build_all_players_grid(
     return players_df
 
 
+def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """
+    Build a table with all free-text comments/suggestions for this group.
+
+    It looks for any column whose header contains 'comment' or 'suggest'
+    (case-insensitive). For each non-empty cell in those columns, we
+    create a row: Player | Comment / Suggestion.
+
+    Long comments are wrapped so they don't overlap in the PDF.
+    """
+    if PLAYER_NAME_INDEX >= len(df_group.columns):
+        return None
+
+    cols = list(df_group.columns)
+
+    # Find likely comment / suggestion columns by name
+    comment_indices: List[int] = []
+    for i, name in enumerate(cols):
+        name_lower = str(name).lower()
+        if "comment" in name_lower or "suggest" in name_lower:
+            comment_indices.append(i)
+
+    if not comment_indices:
+        return None
+
+    rows: List[List[str]] = []
+    for _, row in df_group.iterrows():
+        player = str(row.iloc[PLAYER_NAME_INDEX]).strip()
+        if not player:
+            continue
+
+        for idx in comment_indices:
+            val = row.iloc[idx]
+            if pd.isna(val):
+                continue
+            text = str(val).strip()
+            if not text:
+                continue
+
+            col_label = cols[idx]
+            # If there are multiple comment columns, prefix with which one
+            if len(comment_indices) > 1:
+                text_final = f"[{col_label}] {text}"
+            else:
+                text_final = text
+
+            rows.append([player, text_final])
+
+    if not rows:
+        return None
+
+    comments_df = pd.DataFrame(rows, columns=["Player", "Comment / Suggestion"])
+
+    # Wrap long comments to avoid horizontal overlap in table cells
+    comments_df["Comment / Suggestion"] = comments_df[
+        "Comment / Suggestion"
+    ].apply(lambda s: textwrap.fill(str(s), width=70))
+
+    return comments_df
+
+
 def _add_group_tables_page_to_pdf(
     pdf: PdfPages,
     df_group: pd.DataFrame,
     title_label: str,
     cycle_label: str,
     plots_meta: List[Dict[str, Any]],
+    is_all_teams: bool,
 ) -> None:
     """
-    Page 2 for a group:
-    - Top:  1–3-star reviews (columns = chart numbers)
-    - Mid:  "NO" replies (columns = chart numbers)
-    - Bottom: Players who completed this survey (names packed into 4–6 columns)
+    Page 2 for a group.
 
-    Layout tweaks:
-    - Much less vertical whitespace between tables
-    - Player table uses narrow columns and bigger font
-    - No long blocks of empty rows
+    For ALL TEAMS:
+      - 1–3 star reviews (columns = chart numbers)
+      - "NO" replies (columns = chart numbers)
+      - Completion summary: how many players completed the survey
+
+    For INDIVIDUAL TEAMS:
+      - 1–3 star reviews (columns = chart numbers)
+      - "NO" replies (columns = chart numbers)
+      - Players who completed this survey (names in up to 6 columns)
+      - Comments / suggestions (if any, from comment/suggestion columns)
     """
     # Extract indices and number mappings from meta
     rating_indices = [m["idx"] for m in plots_meta if m["ptype"] == "rating"]
     yesno_indices = [m["idx"] for m in plots_meta if m["ptype"] == "yesno"]
 
     rating_number_by_name = {
-        m["col_name"]: m["number"]
-        for m in plots_meta
-        if m["ptype"] == "rating"
+        m["col_name"]: m["number"] for m in plots_meta if m["ptype"] == "rating"
     }
     yesno_number_by_name = {
-        m["col_name"]: m["number"]
-        for m in plots_meta
-        if m["ptype"] == "yesno"
+        m["col_name"]: m["number"] for m in plots_meta if m["ptype"] == "yesno"
     }
 
     # ----- 1–3 star reviews table (rename columns to chart numbers) -----
@@ -967,7 +1028,6 @@ def _add_group_tables_page_to_pdf(
         if low_df is not None:
             rename_cols: Dict[str, str] = {}
             for col in low_df.columns:
-                # first column will be the index "1-3 Star Reviews" we add later
                 num = rating_number_by_name.get(col)
                 if num is not None:
                     rename_cols[col] = str(num)
@@ -985,39 +1045,75 @@ def _add_group_tables_page_to_pdf(
                     rename_cols2[col] = str(num)
             no_df = no_df.rename(columns=rename_cols2)
 
-    # ----- Players who completed the survey -----
-    players_df = _build_all_players_grid(df_group, max_cols=6)
+    # ----- Players / completion / comments -----
+    players_df: Optional[pd.DataFrame] = None
+    completion_df: Optional[pd.DataFrame] = None
+    comments_df: Optional[pd.DataFrame] = None
 
-    # If literally nothing to show, just skip the page
-    if low_df is None and no_df is None and players_df is None:
+    if is_all_teams:
+        # For All Teams we only show a completion COUNTER, not name list
+        if PLAYER_NAME_INDEX < len(df_group.columns):
+            names = (
+                df_group.iloc[:, PLAYER_NAME_INDEX]
+                .dropna()
+                .astype(str)
+                .str.strip()
+            )
+            names = names[names != ""]
+            total = int(names.nunique())
+            completion_df = pd.DataFrame(
+                {"Metric": ["Players who completed this survey"], "Value": [total]}
+            )
+    else:
+        # For individual teams: show player name grid and comments
+        players_df = _build_all_players_grid(df_group, max_cols=6)
+        comments_df = _build_comments_table(df_group)
+
+    # If literally nothing to show, skip page
+    if (
+        low_df is None
+        and no_df is None
+        and completion_df is None
+        and players_df is None
+        and comments_df is None
+    ):
         return
 
-    # Decide how many rows (subplots) we need
-    sections = []
+    # ----- Decide sections and relative heights -----
+    sections: List[str] = []
     if low_df is not None:
         sections.append("low")
     if no_df is not None:
         sections.append("no")
-    if players_df is not None:
-        sections.append("players")
+    if is_all_teams:
+        if completion_df is not None:
+            sections.append("completion")
+    else:
+        if players_df is not None:
+            sections.append("players")
+        if comments_df is not None:
+            sections.append("comments")
 
     nrows = len(sections)
 
-    # Height ratios: give a bit more room to the players table
-    ratios = []
+    height_ratios: List[float] = []
     for s in sections:
-        if s == "players":
-            ratios.append(1.4)
+        if s == "low":
+            height_ratios.append(1.1)
         elif s == "no":
-            ratios.append(0.9)
-        else:
-            ratios.append(1.1)
+            height_ratios.append(0.9)
+        elif s == "completion":
+            height_ratios.append(0.8)
+        elif s == "players":
+            height_ratios.append(1.3)
+        elif s == "comments":
+            height_ratios.append(1.6)
 
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=1,
-        figsize=(11, 8.5),               # landscape
-        gridspec_kw={"height_ratios": ratios},
+        figsize=(11, 8.5),  # landscape
+        gridspec_kw={"height_ratios": height_ratios},
     )
     if nrows == 1:
         axes = [axes]
@@ -1037,7 +1133,6 @@ def _add_group_tables_page_to_pdf(
         table.auto_set_font_size(False)
         table.set_fontsize(8)
 
-        # Slight width shrink if many columns, and taller rows
         ncols_low = len(low_df.columns)
         if ncols_low <= 8:
             width_scale = 1.0
@@ -1083,8 +1178,29 @@ def _add_group_tables_page_to_pdf(
         )
         row_idx += 1
 
-    # --------- Players who completed the survey ----------
-    if players_df is not None:
+    # --------- Completion summary (All Teams only) ----------
+    if is_all_teams and completion_df is not None:
+        ax = axes[row_idx]
+        ax.axis("off")
+
+        table = ax.table(
+            cellText=completion_df.values,
+            colLabels=completion_df.columns,
+            loc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(11)
+        table.scale(1.2, 1.5)
+
+        ax.set_title(
+            "Survey completion summary",
+            fontsize=10,
+            pad=4,
+        )
+        row_idx += 1
+
+    # --------- Players who completed this survey (team pages) ----------
+    if not is_all_teams and players_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
 
@@ -1094,8 +1210,7 @@ def _add_group_tables_page_to_pdf(
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(9)     # bigger font for names
-        # Narrow-ish columns, taller rows
+        table.set_fontsize(9)
         table.scale(1.0, 1.5)
 
         ax.set_title(
@@ -1103,16 +1218,37 @@ def _add_group_tables_page_to_pdf(
             fontsize=10,
             pad=4,
         )
+        row_idx += 1
 
-    # Global title
+    # --------- Comments / Suggestions (team pages) ----------
+    if not is_all_teams and comments_df is not None:
+        ax = axes[row_idx]
+        ax.axis("off")
+
+        table = ax.table(
+            cellText=comments_df.values,
+            colLabels=comments_df.columns,
+            loc="upper left",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(8)
+        # Slightly narrower columns, taller rows for readability
+        table.scale(1.0, 1.6)
+
+        ax.set_title(
+            "Comments and Suggestions",
+            fontsize=10,
+            pad=4,
+        )
+
+    # Global title + spacing
     fig.suptitle(f"{title_label} – {cycle_label} (Details)", fontsize=12)
-
-    # Less vertical white space between sections
     fig.tight_layout(rect=[0, 0, 1, 0.92])
-    fig.subplots_adjust(hspace=0.4)
+    fig.subplots_adjust(hspace=0.35)
 
     pdf.savefig(fig)
     plt.close(fig)
+
 
 
 
