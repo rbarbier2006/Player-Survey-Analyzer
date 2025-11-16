@@ -781,7 +781,7 @@ def _add_group_charts_page_to_pdf(
             transform=ax.transAxes,
             ha="left",
             va="top",
-            fontsize=10,
+            fontsize=8,
             fontweight="bold",
         )
 
@@ -979,13 +979,10 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
 
     comments_df = pd.DataFrame(rows, columns=["Player", "Comment / Suggestion"])
 
-    # Wrap more tightly so each line fits the cell width
-    # (smaller width -> more lines -> no horizontal clipping)
-    comments_df["Comment / Suggestion"] = comments_df[
-        "Comment / Suggestion"
-    ].apply(lambda s: textwrap.fill(str(s), width=80))
-
+    # IMPORTANT: do NOT manually wrap here.
+    # We keep the full string and let Matplotlib wrap it to the cell width.
     return comments_df
+
 
 
 
@@ -1242,8 +1239,7 @@ def _add_group_tables_page_to_pdf(
         )
         row_idx += 1
 
-    # --------- Comments / Suggestions (team pages) ----------
-    # --------- Comments / Suggestions (team pages) ----------
+ # --------- Comments / Suggestions (team pages) ----------
     if not is_all_teams and comments_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -1253,23 +1249,31 @@ def _add_group_tables_page_to_pdf(
             cellText=comments_df.values,
             colLabels=comments_df.columns,
             loc="upper left",
-            colWidths=[0.18, 0.82],
+            colWidths=[0.15, 0.85],  # 15% for name, 85% for comment
         )
     
         table.auto_set_font_size(False)
-        table.set_fontsize(7)
-        # Taller rows so wrapped comments fit comfortably
-        table.scale(1.05, 2.2)
+        table.set_fontsize(8)
+        # Taller rows so multi-line comments have space
+        table.scale(1.0, 2.0)
     
-        # Left-align the comment text and let it start at the left edge
+        # Align and wrap text properly
         for (r, c), cell in table.get_celld().items():
             if r == 0:
-                # header row, keep centered
+                # header row: center
+                cell.set_text_props(ha="center", va="center")
                 continue
-            if c == 1:  # comment / suggestion column
-                cell._loc = "left"  # align cell contents to left
-                cell.set_text_props(ha="left", va="center")
-                cell.PAD = 0.02  # small padding from left edge
+    
+            if c == 0:
+                # player name column – center is usually fine
+                cell.set_text_props(ha="center", va="center")
+            elif c == 1:
+                # comment column: LEFT align and WRAP to cell width
+                txt = cell.get_text()
+                txt.set_ha("left")
+                txt.set_va("center")
+                txt.set_wrap(True)   # let Matplotlib break lines at cell boundary
+                cell.PAD = 0.02      # small padding from left edge
     
         ax.set_title(
             "Comments and Suggestions",
