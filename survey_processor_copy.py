@@ -880,54 +880,51 @@ def _add_group_charts_page_to_pdf(
 
 def _build_all_players_grid(
     df_group: pd.DataFrame,
-    player_index: int,
-    max_rows_per_col: int = 25,
+    max_cols: int = 6,
 ) -> Optional[pd.DataFrame]:
     """
-    Build a grid of all players who completed the survey for this group.
+    Build a compact grid with all players who completed the survey
+    for this group.
 
-    We return a DataFrame with multiple "Players" columns so that the
-    list fits nicely on a single landscape page.
+    - Uses up to max_cols narrow columns (default 6).
+    - Number of rows is just enough to hold all players
+      (no huge block of empty rows).
     """
-    cols = list(df_group.columns)
-    if player_index >= len(cols):
+    if PLAYER_NAME_INDEX >= len(df_group.columns):
         return None
 
-    names_series = (
-        df_group.iloc[:, player_index]
+    names = (
+        df_group.iloc[:, PLAYER_NAME_INDEX]
+        .dropna()
         .astype(str)
         .str.strip()
     )
-    names = [n for n in names_series.tolist() if n and n.upper() != "NAN"]
+    names = names[names != ""].drop_duplicates()
 
-    # Drop duplicates but keep original order
-    seen = set()
-    unique_names: List[str] = []
-    for n in names:
-        if n not in seen:
-            seen.add(n)
-            unique_names.append(n)
-
-    if not unique_names:
+    if names.empty:
         return None
 
-    # Sort alphabetically
-    unique_names.sort()
+    n = len(names)
+    ncols = min(max_cols, n)
+    nrows = int(np.ceil(n / ncols))
 
-    n_players = len(unique_names)
-    ncols = int(np.ceil(n_players / max_rows_per_col))
-    nrows = max_rows_per_col
+    # Fill by column (top–bottom, then left–right)
+    grid = [["" for _ in range(ncols)] for _ in range(nrows)]
+    i = 0
+    for c in range(ncols):
+        for r in range(nrows):
+            if i >= n:
+                break
+            grid[r][c] = names.iloc[i]
+            i += 1
 
-    # Pad names to fill the grid
-    padded = unique_names + [""] * (ncols * nrows - n_players)
+    col_labels = [f"Players {i+1}" for i in range(ncols)]
+    players_df = pd.DataFrame(grid, columns=col_labels)
 
-    data: Dict[str, List[str]] = {}
-    for col_idx in range(ncols):
-        start = col_idx * nrows
-        end = start + nrows
-        data[f"Players {col_idx + 1}"] = padded[start:end]
+    # Drop any rows that are completely empty (should only be at the bottom)
+    players_df = players_df[(players_df != "").any(axis=1)]
 
-    return pd.DataFrame(data)
+    return players_df
 
 
 def _add_group_tables_page_to_pdf(
@@ -939,9 +936,14 @@ def _add_group_tables_page_to_pdf(
 ) -> None:
     """
     Page 2 for a group:
-    - Top table: all 1–3-star reviews (using chart numbers as column headers)
-    - Middle table: all NO replies to Yes/No questions (also by chart number)
-    - Bottom table: list of all players who completed the survey
+    - Top:  1–3-star reviews (columns = chart numbers)
+    - Mid:  "NO" replies (columns = chart numbers)
+    - Bottom: Players who completed this survey (names packed into 4–6 columns)
+
+    Layout tweaks:
+    - Much less vertical whitespace between tables
+    - Player table uses narrow columns and bigger font
+    - No long blocks of empty rows
     """
     # Extract indices and number mappings from meta
     rating_indices = [m["idx"] for m in plots_meta if m["ptype"] == "rating"]
@@ -958,119 +960,160 @@ def _add_group_tables_page_to_pdf(
         if m["ptype"] == "yesno"
     }
 
-    # 1–3 star reviews table, rename question columns to chart numbers
+    # ----- 1–3 star reviews table (rename columns to chart numbers) -----
     low_df = None
     if rating_indices:
         low_df = build_low_ratings_table(df_group, rating_indices, PLAYER_NAME_INDEX)
         if low_df is not None:
             rename_cols: Dict[str, str] = {}
             for col in low_df.columns:
-                if col == "1-3 Star Reviews":
-                    continue
+                # first column will be the index "1-3 Star Reviews" we add later
                 num = rating_number_by_name.get(col)
                 if num is not None:
                     rename_cols[col] = str(num)
             low_df = low_df.rename(columns=rename_cols)
 
-    # "NO" replies table, also with chart numbers as headers
+    # ----- "NO" replies table (rename columns to chart numbers) -----
     no_df = None
     if yesno_indices:
         no_df = build_no_answers_table(df_group, yesno_indices, PLAYER_NAME_INDEX)
         if no_df is not None:
             rename_cols2: Dict[str, str] = {}
             for col in no_df.columns:
-                if col == "NO Replies":
-                    continue
                 num = yesno_number_by_name.get(col)
                 if num is not None:
                     rename_cols2[col] = str(num)
             no_df = no_df.rename(columns=rename_cols2)
 
-    # Players list table
-    players_df = _build_all_players_grid(df_group, PLAYER_NAME_INDEX)
+    # ----- Players who completed the survey -----
+    players_df = _build_all_players_grid(df_group, max_cols=6)
 
+    # If literally nothing to show, just skip the page
     if low_df is None and no_df is None and players_df is None:
-        return  # nothing to show
+        return
 
-    # How many subplots?
-    nrows = sum(x is not None for x in [low_df, no_df, players_df])
+    # Decide how many rows (subplots) we need
+    sections = []
+    if low_df is not None:
+        sections.append("low")
+    if no_df is not None:
+        sections.append("no")
+    if players_df is not None:
+        sections.append("players")
 
-    # Landscape page
-    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(11, 8.5))
+    nrows = len(sections)
+
+    # Height ratios: give a bit more room to the players table
+    ratios = []
+    for s in sections:
+        if s == "players":
+            ratios.append(1.4)
+        elif s == "no":
+            ratios.append(0.9)
+        else:
+            ratios.append(1.1)
+
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=1,
+        figsize=(11, 8.5),               # landscape
+        gridspec_kw={"height_ratios": ratios},
+    )
     if nrows == 1:
         axes = [axes]
 
     row_idx = 0
 
+    # --------- 1–3 Star Reviews ----------
     if low_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
+
         table = ax.table(
             cellText=low_df.values,
             colLabels=low_df.columns,
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(6)
+        table.set_fontsize(8)
 
+        # Slight width shrink if many columns, and taller rows
         ncols_low = len(low_df.columns)
-        width_scale = min(1.0, 6.0 / max(ncols_low, 1))
-        table.scale(width_scale, 1.1)
+        if ncols_low <= 8:
+            width_scale = 1.0
+        elif ncols_low <= 12:
+            width_scale = 0.85
+        else:
+            width_scale = 0.7
+        table.scale(width_scale, 1.3)
 
         ax.set_title(
-            "1-3 Star Reviews (columns = chart numbers)",
-            fontsize=9,
-            pad=6,
+            "1–3 Star Reviews (columns = chart numbers)",
+            fontsize=10,
+            pad=4,
         )
         row_idx += 1
 
+    # --------- "NO" Replies ----------
     if no_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
+
         table = ax.table(
             cellText=no_df.values,
             colLabels=no_df.columns,
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(6)
+        table.set_fontsize(8)
 
         ncols_no = len(no_df.columns)
-        width_scale = min(1.0, 6.0 / max(ncols_no, 1))
-        table.scale(width_scale, 1.1)
+        if ncols_no <= 6:
+            width_scale = 1.0
+        elif ncols_no <= 10:
+            width_scale = 0.9
+        else:
+            width_scale = 0.75
+        table.scale(width_scale, 1.3)
 
         ax.set_title(
             '"NO" Replies (columns = chart numbers)',
-            fontsize=9,
-            pad=6,
+            fontsize=10,
+            pad=4,
         )
         row_idx += 1
 
+    # --------- Players who completed the survey ----------
     if players_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
+
         table = ax.table(
             cellText=players_df.values,
             colLabels=players_df.columns,
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(7)
-
-        ncols_players = len(players_df.columns)
-        width_scale = min(1.0, 8.0 / max(ncols_players, 1))
-        table.scale(width_scale, 1.1)
+        table.set_fontsize(9)     # bigger font for names
+        # Narrow-ish columns, taller rows
+        table.scale(1.0, 1.5)
 
         ax.set_title(
             "Players who completed this survey",
-            fontsize=9,
-            pad=6,
+            fontsize=10,
+            pad=4,
         )
 
+    # Global title
     fig.suptitle(f"{title_label} – {cycle_label} (Details)", fontsize=12)
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
+
+    # Less vertical white space between sections
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
+    fig.subplots_adjust(hspace=0.4)
+
     pdf.savefig(fig)
     plt.close(fig)
+
 
 
 def create_pdf_from_original(
