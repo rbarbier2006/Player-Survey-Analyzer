@@ -679,32 +679,16 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
 
 
 # -------------------------------------------------------------------
-# PDF: one page per sheet (All_Data + each team)
+# PDF: TWO pages per group (All_Data + each team):
+#   Page 1: charts, numbered 1,2,3,...
+#   Page 2: 1-3-star and "NO" tables, with columns = chart numbers
 # -------------------------------------------------------------------
 
-def wrap_title(text: str, width: int = 40) -> str:
+def _build_plot_metadata(df_group: pd.DataFrame) -> list[dict]:
     """
-    Wrap long axis / chart titles onto multiple lines
-    so they don't overlap in the PDF.
-    """
-    return "\n".join(textwrap.wrap(str(text), width=width))
-
-
-def _add_group_page_to_pdf(
-    pdf: PdfPages,
-    df_group: pd.DataFrame,
-    title_label: str,
-    cycle_label: str,
-) -> None:
-    """
-    Create ONE PDF page for ONE group (All_Data or a specific team).
-
-    The page contains:
-    - bar charts for all star-rating questions (1–5 stars, with average)
-    - pie charts for Yes/No questions (YES/NO, % + count)
-    - pie chart for the 5-value choice (column O), % + count
-
-    All charts are arranged in a grid on a single page.
+    For a given group (All teams or a single team), build metadata
+    for every plot we want to draw, and assign it a number
+    starting at 1 for THIS group.
     """
     cols = list(df_group.columns)
 
@@ -712,18 +696,60 @@ def _add_group_page_to_pdf(
     yesno_indices = [idx for idx in YESNO_COL_INDICES if idx < len(cols)]
     has_choice = CHOICE_COL_INDEX < len(cols)
 
-    plots: list[tuple[str, int]] = []
-    for idx in rating_indices:
-        plots.append(("rating", idx))
-    for idx in yesno_indices:
-        plots.append(("yesno", idx))
-    if has_choice:
-        plots.append(("choice", CHOICE_COL_INDEX))
+    meta: list[dict] = []
+    number = 1  # restart numbering for each group
 
-    if not plots:
+    for idx in rating_indices:
+        meta.append(
+            {
+                "ptype": "rating",
+                "idx": idx,
+                "col_name": cols[idx],
+                "number": number,
+            }
+        )
+        number += 1
+
+    for idx in yesno_indices:
+        meta.append(
+            {
+                "ptype": "yesno",
+                "idx": idx,
+                "col_name": cols[idx],
+                "number": number,
+            }
+        )
+        number += 1
+
+    if has_choice:
+        meta.append(
+            {
+                "ptype": "choice",
+                "idx": CHOICE_COL_INDEX,
+                "col_name": cols[CHOICE_COL_INDEX],
+                "number": number,
+            }
+        )
+
+    return meta
+
+
+def _add_group_charts_page_to_pdf(
+    pdf: PdfPages,
+    df_group: pd.DataFrame,
+    title_label: str,
+    cycle_label: str,
+    plots_meta: list[dict],
+) -> None:
+    """
+    Page 1 for a group: all charts laid out in a grid, each labelled
+    with a big number in the top-left (1,2,3,...) that resets per group.
+    Titles are wrapped so they don't overlap.
+    """
+    if not plots_meta:
         return
 
-    n_plots = len(plots)
+    n_plots = len(plots_meta)
     ncols = 3
     nrows = int(np.ceil(n_plots / ncols))
 
@@ -740,8 +766,28 @@ def _add_group_page_to_pdf(
     for ax in axes_flat[n_plots:]:
         ax.axis("off")
 
-    for ax, (ptype, idx) in zip(axes_flat, plots):
-        col_name = cols[idx]
+    cols = list(df_group.columns)
+
+    for ax, meta in zip(axes_flat, plots_meta):
+        ptype = meta["ptype"]
+        idx = meta["idx"]
+        col_name = meta["col_name"]
+        number = meta["number"]
+
+        # Put the big chart number in the top-left
+        ax.text(
+            0.02,
+            0.98,
+            str(number),
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=10,
+            fontweight="bold",
+        )
+
+        # Wrap the question text so titles don't overlap
+        wrapped_name = textwrap.fill(col_name, width=40)
 
         if ptype == "rating":
             series = pd.to_numeric(df_group.iloc[:, idx], errors="coerce").dropna()
@@ -750,9 +796,9 @@ def _add_group_page_to_pdf(
 
             avg = series.mean() if not series.empty else None
             if avg is not None and not np.isnan(avg):
-                title = f"{wrap_title(col_name)}\n(Avg = {avg:.2f})"
+                title = f"{wrapped_name}\n(Avg = {avg:.2f})"
             else:
-                title = wrap_title(col_name)
+                title = wrapped_name
 
             ax.set_title(title, fontsize=8)
             ax.set_xlabel("# of Stars", fontsize=7)
@@ -792,7 +838,7 @@ def _add_group_page_to_pdf(
                     autopct=make_label,
                     textprops={"fontsize": 7},
                 )
-                ax.set_title(wrap_title(col_name), fontsize=8)
+                ax.set_title(wrapped_name, fontsize=8)
 
         elif ptype == "choice":
             series = df_group.iloc[:, idx].dropna()
@@ -825,14 +871,121 @@ def _add_group_page_to_pdf(
                     autopct=make_label,
                     textprops={"fontsize": 7},
                 )
-                ax.set_title(wrap_title(col_name), fontsize=8)
+                ax.set_title(wrapped_name, fontsize=8)
 
     fig.suptitle(f"{title_label} – {cycle_label}", fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    pdf.savefig(fig)
+    plt.close(fig)
 
-    # Extra vertical space so titles don't collide
-    fig.subplots_adjust(hspace=0.9)
+
+def _add_group_tables_page_to_pdf(
+    pdf: PdfPages,
+    df_group: pd.DataFrame,
+    title_label: str,
+    cycle_label: str,
+    plots_meta: list[dict],
+) -> None:
+    """
+    Page 2 for a group:
+    - Top table: all 1–3-star reviews (using chart numbers as column headers)
+    - Bottom table: all NO replies to Yes/No questions (also by chart number)
+    """
+    # Extract indices and number mappings from meta
+    rating_indices = [m["idx"] for m in plots_meta if m["ptype"] == "rating"]
+    yesno_indices = [m["idx"] for m in plots_meta if m["ptype"] == "yesno"]
+
+    rating_number_by_name = {
+        m["col_name"]: m["number"]
+        for m in plots_meta
+        if m["ptype"] == "rating"
+    }
+    yesno_number_by_name = {
+        m["col_name"]: m["number"]
+        for m in plots_meta
+        if m["ptype"] == "yesno"
+    }
+
+    # 1–3 star reviews table, but rename question columns to chart numbers
+    low_df = None
+    if rating_indices:
+        low_df = build_low_ratings_table(df_group, rating_indices, PLAYER_NAME_INDEX)
+        if low_df is not None:
+            rename_cols = {}
+            for col in low_df.columns:
+                if col == "1-3 Star Reviews":
+                    continue
+                num = rating_number_by_name.get(col)
+                if num is not None:
+                    rename_cols[col] = str(num)
+            low_df = low_df.rename(columns=rename_cols)
+
+    # "NO" replies table, also with chart numbers as headers
+    no_df = None
+    if yesno_indices:
+        no_df = build_no_answers_table(df_group, yesno_indices, PLAYER_NAME_INDEX)
+        if no_df is not None:
+            rename_cols = {}
+            for col in no_df.columns:
+                if col == "NO Replies":
+                    continue
+                num = yesno_number_by_name.get(col)
+                if num is not None:
+                    rename_cols[col] = str(num)
+            no_df = no_df.rename(columns=rename_cols)
+
+    if low_df is None and no_df is None:
+        return  # nothing to show
+
+    # Decide whether we need one or two subplots
+    if low_df is not None and no_df is not None:
+        nrows = 2
+    else:
+        nrows = 1
+
+    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(8.5, 11))
+    if nrows == 1:
+        axes = [axes]
+
+    row_idx = 0
+
+    if low_df is not None:
+        ax = axes[row_idx]
+        ax.axis("off")
+        table = ax.table(
+            cellText=low_df.values,
+            colLabels=low_df.columns,
+            loc="upper left",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(6)
+        table.auto_set_column_width(col=list(range(len(low_df.columns))))
+        ax.set_title(
+            "1–3 Star Reviews (columns = chart numbers)",
+            fontsize=9,
+            pad=6,
+        )
+        row_idx += 1
+
+    if no_df is not None:
+        ax = axes[row_idx]
+        ax.axis("off")
+        table = ax.table(
+            cellText=no_df.values,
+            colLabels=no_df.columns,
+            loc="upper left",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(6)
+        table.auto_set_column_width(col=list(range(len(no_df.columns))))
+        ax.set_title(
+            '"NO" Replies (columns = chart numbers)',
+            fontsize=9,
+            pad=6,
+        )
+
+    fig.suptitle(f"{title_label} – {cycle_label} (Details)", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
-
     pdf.savefig(fig)
     plt.close(fig)
 
@@ -843,15 +996,11 @@ def create_pdf_from_original(
     output_path: Optional[str] = None,
 ) -> str:
     """
-    Use the ORIGINAL survey Excel file and create a single PDF:
+    Use the ORIGINAL survey Excel file and create a PDF:
 
-    - Page 1: All teams combined (same as All_Data sheet)
-    - Page 2+: One page per team (grouped by column G)
-
-    Each page contains:
-    - bar charts for all star-rating questions
-    - pie charts for Yes/No questions
-    - pie chart for the 5-value choice question (column O)
+    For All Teams + each team:
+      - Page 1: charts grid (numbered 1,2,3,... per team)
+      - Page 2: detail tables (1–3-star and NO replies)
     """
     if output_path is None:
         base, _ = os.path.splitext(input_path)
@@ -869,11 +1018,21 @@ def create_pdf_from_original(
     df[group_col_name] = df[group_col_name].fillna("UNASSIGNED")
 
     with PdfPages(output_path) as pdf:
-        # All teams page
-        _add_group_page_to_pdf(pdf, df, "All Teams", cycle_label)
+        # All teams
+        meta_all = _build_plot_metadata(df)
+        _add_group_charts_page_to_pdf(pdf, df, "All Teams", cycle_label, meta_all)
+        _add_group_tables_page_to_pdf(pdf, df, "All Teams", cycle_label, meta_all)
 
-        # One page per team
+        # One pair of pages per team
         for group_value, group_df in df.groupby(group_col_name, sort=True):
-            _add_group_page_to_pdf(pdf, group_df, str(group_value), cycle_label)
+            title_label = str(group_value)
+            meta = _build_plot_metadata(group_df)
+
+            _add_group_charts_page_to_pdf(
+                pdf, group_df, title_label, cycle_label, meta
+            )
+            _add_group_tables_page_to_pdf(
+                pdf, group_df, title_label, cycle_label, meta
+            )
 
     return output_path
