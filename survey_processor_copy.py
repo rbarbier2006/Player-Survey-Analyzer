@@ -1002,3 +1002,4 @@ def _add_group_tables_page_to_pdf(
     pdf.savefig(fig)
     plt.close(fig)
 
+  return output_path
