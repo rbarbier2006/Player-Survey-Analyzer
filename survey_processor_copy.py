@@ -1243,38 +1243,40 @@ def _add_group_tables_page_to_pdf(
         row_idx += 1
 
     # --------- Comments / Suggestions (team pages) ----------
-if not is_all_teams and comments_df is not None:
-    ax = axes[row_idx]
-    ax.axis("off")
+    # --------- Comments / Suggestions (team pages) ----------
+    if not is_all_teams and comments_df is not None:
+        ax = axes[row_idx]
+        ax.axis("off")
+    
+        # Narrow player column, wide comment column
+        table = ax.table(
+            cellText=comments_df.values,
+            colLabels=comments_df.columns,
+            loc="upper left",
+            colWidths=[0.18, 0.82],
+        )
+    
+        table.auto_set_font_size(False)
+        table.set_fontsize(7)
+        # Taller rows so wrapped comments fit comfortably
+        table.scale(1.05, 2.2)
+    
+        # Left-align the comment text and let it start at the left edge
+        for (r, c), cell in table.get_celld().items():
+            if r == 0:
+                # header row, keep centered
+                continue
+            if c == 1:  # comment / suggestion column
+                cell._loc = "left"  # align cell contents to left
+                cell.set_text_props(ha="left", va="center")
+                cell.PAD = 0.02  # small padding from left edge
+    
+        ax.set_title(
+            "Comments and Suggestions",
+            fontsize=10,
+            pad=6,
+        )
 
-    # Narrow player column, wide comment column
-    table = ax.table(
-        cellText=comments_df.values,
-        colLabels=comments_df.columns,
-        loc="upper left",
-        colWidths=[0.18, 0.82],
-    )
-
-    table.auto_set_font_size(False)
-    table.set_fontsize(7)
-    # Taller rows so wrapped comments fit comfortably
-    table.scale(1.05, 2.2)
-
-    # Left-align the comment text and let it start at the left edge
-    for (r, c), cell in table.get_celld().items():
-        if r == 0:
-            # header row, keep centered
-            continue
-        if c == 1:  # comment / suggestion column
-            cell._loc = "left"  # align cell contents to left
-            cell.set_text_props(ha="left", va="center")
-            cell.PAD = 0.02  # small padding from left edge
-
-    ax.set_title(
-        "Comments and Suggestions",
-        fontsize=10,
-        pad=6,
-    )
 
 
     # Global title + spacing
