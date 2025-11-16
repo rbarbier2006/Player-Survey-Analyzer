@@ -5,9 +5,9 @@ import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import textwrap
 from matplotlib.backends.backend_pdf import PdfPages
 from typing import Optional
-
 
 
 # Column layout based on your description
@@ -682,6 +682,14 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
 # PDF: one page per sheet (All_Data + each team)
 # -------------------------------------------------------------------
 
+def wrap_title(text: str, width: int = 40) -> str:
+    """
+    Wrap long axis / chart titles onto multiple lines
+    so they don't overlap in the PDF.
+    """
+    return "\n".join(textwrap.wrap(str(text), width=width))
+
+
 def _add_group_page_to_pdf(
     pdf: PdfPages,
     df_group: pd.DataFrame,
@@ -742,9 +750,9 @@ def _add_group_page_to_pdf(
 
             avg = series.mean() if not series.empty else None
             if avg is not None and not np.isnan(avg):
-                title = f"{col_name}\n(Avg = {avg:.2f})"
+                title = f"{wrap_title(col_name)}\n(Avg = {avg:.2f})"
             else:
-                title = col_name
+                title = wrap_title(col_name)
 
             ax.set_title(title, fontsize=8)
             ax.set_xlabel("# of Stars", fontsize=7)
@@ -784,7 +792,7 @@ def _add_group_page_to_pdf(
                     autopct=make_label,
                     textprops={"fontsize": 7},
                 )
-                ax.set_title(col_name, fontsize=8)
+                ax.set_title(wrap_title(col_name), fontsize=8)
 
         elif ptype == "choice":
             series = df_group.iloc[:, idx].dropna()
@@ -817,10 +825,14 @@ def _add_group_page_to_pdf(
                     autopct=make_label,
                     textprops={"fontsize": 7},
                 )
-                ax.set_title(col_name, fontsize=8)
+                ax.set_title(wrap_title(col_name), fontsize=8)
 
     fig.suptitle(f"{title_label} – {cycle_label}", fontsize=12)
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+
+    # Extra vertical space so titles don't collide
+    fig.subplots_adjust(hspace=0.9)
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
+
     pdf.savefig(fig)
     plt.close(fig)
 
@@ -830,7 +842,6 @@ def create_pdf_from_original(
     cycle_label: str = "Cycle",
     output_path: Optional[str] = None,
 ) -> str:
-
     """
     Use the ORIGINAL survey Excel file and create a single PDF:
 
