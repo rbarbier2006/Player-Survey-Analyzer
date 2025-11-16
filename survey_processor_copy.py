@@ -1114,7 +1114,6 @@ def _add_group_tables_page_to_pdf(
     height_ratios: List[float] = []
     for s in sections:
         if s == "low":
-            # slightly shorter so there is more gap before the NO table
             height_ratios.append(1.0)
         elif s == "no":
             height_ratios.append(1.0)
@@ -1123,7 +1122,6 @@ def _add_group_tables_page_to_pdf(
         elif s == "players":
             height_ratios.append(1.3)
         elif s == "comments":
-            # extra space for wrapped comments
             height_ratios.append(2.0)
 
     fig, axes = plt.subplots(
@@ -1142,24 +1140,37 @@ def _add_group_tables_page_to_pdf(
         ax = axes[row_idx]
         ax.axis("off")
 
+        # Wrap long name strings so they can use a second line
+        low_wrapped = low_df.copy().astype(str)
+        for col in low_wrapped.columns:
+            low_wrapped[col] = low_wrapped[col].apply(
+                lambda s: textwrap.fill(s, width=18) if isinstance(s, str) and s else s
+            )
+
         table = ax.table(
-            cellText=low_df.values,
-            colLabels=low_df.columns,
+            cellText=low_wrapped.values,
+            colLabels=low_wrapped.columns,
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        # smaller font so long names fit
         table.set_fontsize(7)
 
-        ncols_low = len(low_df.columns)
+        ncols_low = len(low_wrapped.columns)
         if ncols_low <= 8:
             width_scale = 1.35
         elif ncols_low <= 12:
             width_scale = 1.15
         else:
             width_scale = 0.9
-        # slightly smaller height so it does not run into the NO section
-        table.scale(width_scale, 1.15)
+        # a bit taller to give space for wrapped lines
+        table.scale(width_scale, 1.4)
+
+        # Center header and body text
+        for (r, c), cell in table.get_celld().items():
+            if r == 0:
+                cell.set_text_props(ha="center", va="center")
+            else:
+                cell.set_text_props(ha="center", va="center")
 
         ax.set_title(
             "1-3 Star Reviews (columns = chart numbers)",
@@ -1284,11 +1295,8 @@ def _add_group_tables_page_to_pdf(
     # Global title + spacing
     fig.suptitle(f"{title_label} - {cycle_label} (Details)", fontsize=12)
 
-    # Pack contents, then adjust vertical spacing.
     fig.tight_layout(rect=[0, 0.03, 1, 0.9])
-
     if is_all_teams:
-        # Bigger gap between 1-3 and NO tables on the All Teams page
         fig.subplots_adjust(hspace=0.65)
     else:
         fig.subplots_adjust(hspace=0.4)
