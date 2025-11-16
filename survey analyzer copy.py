@@ -4,6 +4,9 @@ import os
 import re
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+
 
 # Column layout based on your description
 # F: player name
@@ -669,5 +672,194 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
                 next_row,
                 group_df,
             )
+
+    return output_path
+
+
+# -------------------------------------------------------------------
+# PDF: one page per sheet (All_Data + each team)
+# -------------------------------------------------------------------
+
+def _add_group_page_to_pdf(
+    pdf: PdfPages,
+    df_group: pd.DataFrame,
+    title_label: str,
+    cycle_label: str,
+) -> None:
+    """
+    Create ONE PDF page for ONE group (All_Data or a specific team).
+
+    The page contains:
+    - bar charts for all star-rating questions (1–5 stars, with average)
+    - pie charts for Yes/No questions (YES/NO, % + count)
+    - pie chart for the 5-value choice (column O), % + count
+
+    All charts are arranged in a grid on a single page.
+    """
+    cols = list(df_group.columns)
+
+    rating_indices = [idx for idx in RATING_COL_INDICES if idx < len(cols)]
+    yesno_indices = [idx for idx in YESNO_COL_INDICES if idx < len(cols)]
+    has_choice = CHOICE_COL_INDEX < len(cols)
+
+    plots: list[tuple[str, int]] = []
+    for idx in rating_indices:
+        plots.append(("rating", idx))
+    for idx in yesno_indices:
+        plots.append(("yesno", idx))
+    if has_choice:
+        plots.append(("choice", CHOICE_COL_INDEX))
+
+    if not plots:
+        return
+
+    n_plots = len(plots)
+    ncols = 3
+    nrows = int(np.ceil(n_plots / ncols))
+
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(8.5, 11))
+
+    # Normalize axes to a flat list
+    if nrows == 1 and ncols == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = np.array([axes])
+    axes_flat = axes.flatten()
+
+    # Turn off any unused axes
+    for ax in axes_flat[n_plots:]:
+        ax.axis("off")
+
+    for ax, (ptype, idx) in zip(axes_flat, plots):
+        col_name = cols[idx]
+
+        if ptype == "rating":
+            series = pd.to_numeric(df_group.iloc[:, idx], errors="coerce").dropna()
+            counts = series.value_counts().reindex([1, 2, 3, 4, 5], fill_value=0)
+            ax.bar(range(1, 6), counts.values)
+
+            avg = series.mean() if not series.empty else None
+            if avg is not None and not np.isnan(avg):
+                title = f"{col_name}\n(Avg = {avg:.2f})"
+            else:
+                title = col_name
+
+            ax.set_title(title, fontsize=8)
+            ax.set_xlabel("# of Stars", fontsize=7)
+            ax.set_ylabel("Player Count", fontsize=7)
+            ax.tick_params(labelsize=7)
+            ax.set_ylim(0, max(counts.values.tolist() + [1]) * 1.2)
+
+        elif ptype == "yesno":
+            series = df_group.iloc[:, idx].astype(str).str.strip().str.upper()
+            yes_count = int((series == "YES").sum())
+            no_count = int((series == "NO").sum())
+            data = [yes_count, no_count]
+            labels = ["YES", "NO"]
+
+            if yes_count + no_count == 0:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No data",
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                )
+                ax.axis("off")
+            else:
+                def make_label(pct, allvals=data):
+                    total = sum(allvals)
+                    if total == 0:
+                        count = 0
+                    else:
+                        count = int(round(pct * total / 100.0))
+                    return f"{pct:.0f}%, {count}"
+
+                ax.pie(
+                    data,
+                    labels=labels,
+                    autopct=make_label,
+                    textprops={"fontsize": 7},
+                )
+                ax.set_title(col_name, fontsize=8)
+
+        elif ptype == "choice":
+            series = df_group.iloc[:, idx].dropna()
+            counts = series.value_counts()
+            data = counts.values
+            labels = counts.index.tolist()
+
+            if len(data) == 0:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No data",
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                )
+                ax.axis("off")
+            else:
+                def make_label(pct, allvals=data):
+                    total = sum(allvals)
+                    if total == 0:
+                        count = 0
+                    else:
+                        count = int(round(pct * total / 100.0))
+                    return f"{pct:.0f}%, {count}"
+
+                ax.pie(
+                    data,
+                    labels=labels,
+                    autopct=make_label,
+                    textprops={"fontsize": 7},
+                )
+                ax.set_title(col_name, fontsize=8)
+
+    fig.suptitle(f"{title_label} – {cycle_label}", fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def create_pdf_from_original(
+    input_path: str,
+    cycle_label: str = "Cycle",
+    output_path: str | None = None,
+) -> str:
+    """
+    Use the ORIGINAL survey Excel file and create a single PDF:
+
+    - Page 1: All teams combined (same as All_Data sheet)
+    - Page 2+: One page per team (grouped by column G)
+
+    Each page contains:
+    - bar charts for all star-rating questions
+    - pie charts for Yes/No questions
+    - pie chart for the 5-value choice question (column O)
+    """
+    if output_path is None:
+        base, _ = os.path.splitext(input_path)
+        output_path = base + "_report.pdf"
+
+    # Read original data
+    df = pd.read_excel(input_path, sheet_name=0)
+
+    if GROUP_COL_INDEX >= len(df.columns):
+        raise ValueError(
+            "Group column G is outside the available columns in the sheet."
+        )
+
+    group_col_name = df.columns[GROUP_COL_INDEX]
+    df[group_col_name] = df[group_col_name].fillna("UNASSIGNED")
+
+    with PdfPages(output_path) as pdf:
+        # All teams page
+        _add_group_page_to_pdf(pdf, df, "All Teams", cycle_label)
+
+        # One page per team
+        for group_value, group_df in df.groupby(group_col_name, sort=True):
+            _add_group_page_to_pdf(pdf, group_df, str(group_value), cycle_label)
 
     return output_path
