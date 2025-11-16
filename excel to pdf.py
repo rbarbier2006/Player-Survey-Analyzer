@@ -1,5 +1,4 @@
 from excel_to_pdf import excel_to_pdf
-pip install pandas matplotlib openpyxl
 
 # after you’ve saved the uploaded processed Excel to, say, processed_path
 pdf_path = excel_to_pdf(processed_path)
