@@ -1015,12 +1015,12 @@ def _add_group_tables_page_to_pdf(
     Page 2 for a group.
 
     For ALL TEAMS:
-      - 1–3 star reviews (columns = chart numbers)
+      - 1-3 star reviews (columns = chart numbers)
       - "NO" replies (columns = chart numbers)
       - Completion summary: how many players completed the survey
 
     For INDIVIDUAL TEAMS:
-      - 1–3 star reviews (columns = chart numbers)
+      - 1-3 star reviews (columns = chart numbers)
       - "NO" replies (columns = chart numbers)
       - Players who completed this survey (names in up to 6 columns)
       - Comments / suggestions (if any, from comment/suggestion columns)
@@ -1036,7 +1036,7 @@ def _add_group_tables_page_to_pdf(
         m["col_name"]: m["number"] for m in plots_meta if m["ptype"] == "yesno"
     }
 
-    # ----- 1–3 star reviews table (rename columns to chart numbers) -----
+    # ----- 1-3 star reviews table (rename columns to chart numbers) -----
     low_df = None
     if rating_indices:
         low_df = build_low_ratings_table(df_group, rating_indices, PLAYER_NAME_INDEX)
@@ -1114,21 +1114,22 @@ def _add_group_tables_page_to_pdf(
     height_ratios: List[float] = []
     for s in sections:
         if s == "low":
+            # slightly shorter so there is more gap before the NO table
             height_ratios.append(1.0)
         elif s == "no":
-            height_ratios.append(0.9)
+            height_ratios.append(1.0)
         elif s == "completion":
             height_ratios.append(0.8)
         elif s == "players":
             height_ratios.append(1.3)
         elif s == "comments":
+            # extra space for wrapped comments
             height_ratios.append(2.0)
 
-    # Landscape page
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=1,
-        figsize=(11, 8.5),
+        figsize=(11, 8.5),  # landscape
         gridspec_kw={"height_ratios": height_ratios},
     )
     if nrows == 1:
@@ -1136,16 +1137,7 @@ def _add_group_tables_page_to_pdf(
 
     row_idx = 0
 
-    # Helper: width scaling – slightly wider for "All Teams"
-    def _width_scale_for(ncols: int, for_all_teams: bool) -> float:
-        base = 1.15 if for_all_teams else 1.0  # All Teams gets a bit wider
-        if ncols <= 8:
-            return base
-        elif ncols <= 12:
-            return base * 0.9
-        return base * 0.75
-
-    # --------- 1–3 Star Reviews ----------
+    # --------- 1-3 Star Reviews ----------
     if low_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -1156,16 +1148,23 @@ def _add_group_tables_page_to_pdf(
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(8)  # back to the smaller, single-line style
+        # smaller font so long names fit
+        table.set_fontsize(7)
 
         ncols_low = len(low_df.columns)
-        width_scale = _width_scale_for(ncols_low, is_all_teams)
-        table.scale(width_scale, 1.3)
+        if ncols_low <= 8:
+            width_scale = 1.35
+        elif ncols_low <= 12:
+            width_scale = 1.15
+        else:
+            width_scale = 0.9
+        # slightly smaller height so it does not run into the NO section
+        table.scale(width_scale, 1.15)
 
         ax.set_title(
-            "1–3 Star Reviews (columns = chart numbers)",
+            "1-3 Star Reviews (columns = chart numbers)",
             fontsize=10,
-            pad=4,
+            pad=6,
         )
         row_idx += 1
 
@@ -1180,16 +1179,21 @@ def _add_group_tables_page_to_pdf(
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(8)
+        table.set_fontsize(7)
 
         ncols_no = len(no_df.columns)
-        width_scale = _width_scale_for(ncols_no, is_all_teams)
-        table.scale(width_scale, 1.3)
+        if ncols_no <= 8:
+            width_scale = 1.35
+        elif ncols_no <= 12:
+            width_scale = 1.15
+        else:
+            width_scale = 0.9
+        table.scale(width_scale, 1.15)
 
         ax.set_title(
             '"NO" Replies (columns = chart numbers)',
             fontsize=10,
-            pad=10,  # extra pad so it clearly sits under the 1–3 table
+            pad=6,
         )
         row_idx += 1
 
@@ -1264,12 +1268,12 @@ def _add_group_tables_page_to_pdf(
                 # player name column
                 cell.set_text_props(ha="center", va="center")
             elif c == 1:
-                # comment column: LEFT aligned, wrapped
+                # comment column: left align and wrap to cell width
                 txt = cell.get_text()
                 txt.set_ha("left")
                 txt.set_va("center")
                 txt.set_wrap(True)
-                cell.PAD = 0.02
+                cell.PAD = 0.02  # small padding from left edge
 
         ax.set_title(
             "Comments and Suggestions",
@@ -1278,20 +1282,19 @@ def _add_group_tables_page_to_pdf(
         )
 
     # Global title + spacing
-    fig.suptitle(
-        f"{title_label} – {cycle_label} (Details)",
-        fontsize=12,
-        y=0.96,  # push a bit higher so tables start higher
-    )
-    # Use most of the page width, keep a small margin
-    fig.tight_layout(rect=[0.03, 0.05, 0.97, 0.93])
-    # Vertical gap between sections; NO table stays clearly below 1–3 table
-    fig.subplots_adjust(hspace=0.45)
+    fig.suptitle(f"{title_label} - {cycle_label} (Details)", fontsize=12)
+
+    # Pack contents, then adjust vertical spacing.
+    fig.tight_layout(rect=[0, 0.03, 1, 0.9])
+
+    if is_all_teams:
+        # Bigger gap between 1-3 and NO tables on the All Teams page
+        fig.subplots_adjust(hspace=0.65)
+    else:
+        fig.subplots_adjust(hspace=0.4)
 
     pdf.savefig(fig)
     plt.close(fig)
-
-
 
 
 
