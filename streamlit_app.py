@@ -1,56 +1,87 @@
+# streamlit_app.py
+
+import os
 import tempfile
 
-import pandas as pd
 import streamlit as st
 
-from survey_processor import process_workbook
+from survey_processor import process_workbook, create_pdf_from_original
 
-st.set_page_config(page_title="Player Survey Analyzer", layout="centered")
 
-st.title("Player Survey Analyzer")
+def main():
+    st.title("Player Survey Analyzer")
 
-st.write(
-    "Upload an Excel file with the player survey responses. "
-    "The app will split the data by Team+Category (column G), "
-    "add summary tables to each sheet, and return a processed Excel file."
-)
+    st.markdown(
+        """
+Upload the **original survey Excel file** from the players.
 
-uploaded = st.file_uploader("Upload Excel file", type=["xlsx", "xls"])
-
-if uploaded is not None:
-    # Save uploaded file to a temporary path
-    suffix = ".xlsx"
-    if uploaded.name.lower().endswith(".xls"):
-        suffix = ".xls"
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_in:
-        tmp_in.write(uploaded.getvalue())
-        tmp_in_path = tmp_in.name
-
-    with st.spinner("Processing workbook..."):
-        # Use your existing function to build the processed workbook
-        out_path = process_workbook(tmp_in_path)
-
-    # Read processed file back into memory
-    with open(out_path, "rb") as f:
-        processed_bytes = f.read()
-
-    st.success("Processing complete.")
-
-    # Optional preview of the All_Data sheet (first 10 rows)
-    try:
-        df_preview = pd.read_excel(out_path, sheet_name="All_Data")
-        st.subheader("Preview of All_Data sheet (first 10 rows)")
-        st.dataframe(df_preview.head(10))
-    except Exception:
-        st.info("Could not load preview, but the file is ready to download.")
-
-    # Download button
-    st.download_button(
-        label="Download processed Excel file",
-        data=processed_bytes,
-        file_name="player_survey_processed.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+This app will:
+1. Create a processed Excel file (split by team, with all tables and charts).
+2. Create a combined PDF report (one page per team, with charts).
+"""
     )
-else:
-    st.info("Select an Excel file to begin.")
+
+    cycle_label = st.text_input(
+        "Cycle label (used in the PDF title)",
+        value="Cycle X",
+    )
+
+    uploaded_file = st.file_uploader(
+        "Upload original survey Excel (.xlsx)",
+        type=["xlsx", "xls"],
+    )
+
+    if uploaded_file is None:
+        st.info("Select an Excel file to begin.")
+        return
+
+    st.write(f"Uploaded file: **{uploaded_file.name}**")
+
+    if st.button("Run analysis"):
+        # Save uploaded file to a temporary path
+        with st.spinner("Saving uploaded file..."):
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=".xlsx"
+            ) as tmp:
+                tmp.write(uploaded_file.getbuffer())
+                original_path = tmp.name
+
+        # 1) Processed Excel
+        with st.spinner("Creating processed Excel workbook..."):
+            processed_path = process_workbook(original_path)
+
+        # 2) Combined PDF
+        with st.spinner("Creating PDF report..."):
+            pdf_path = create_pdf_from_original(
+                original_path,
+                cycle_label=cycle_label,
+            )
+
+        st.success("Done! Download your files below.")
+
+        # Download: processed Excel
+        st.subheader("Processed Excel")
+        with open(processed_path, "rb") as f:
+            st.download_button(
+                label="Download processed Excel",
+                data=f,
+                file_name=os.path.basename(processed_path),
+                mime=(
+                    "application/"
+                    "vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ),
+            )
+
+        # Download: combined PDF
+        st.subheader("PDF report")
+        with open(pdf_path, "rb") as fpdf:
+            st.download_button(
+                label="Download PDF report",
+                data=fpdf,
+                file_name=os.path.basename(pdf_path),
+                mime="application/pdf",
+            )
+
+
+if __name__ == "__main__":
+    main()
