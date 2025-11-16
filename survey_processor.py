@@ -4,6 +4,8 @@ import os
 import re
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
 # Column layout based on your description
 # F: player name
@@ -671,3 +673,217 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
             )
 
     return output_path
+
+
+# -------------------------------------------------------------------
+# PDF REPORT GENERATION (from processed workbook)
+# -------------------------------------------------------------------
+
+def safe_filename(name: str) -> str:
+    """Make a reasonably safe filename from a team name."""
+    bad_chars = r'\/:*?"<>|'
+    fname = "".join("_" if c in bad_chars else c for c in str(name))
+    return fname.strip() or "Report"
+
+
+def extract_data_block(df_full: pd.DataFrame) -> pd.DataFrame:
+    """
+    In the processed workbook, each sheet has:
+      - original data rows at the top
+      - 3 blank rows
+      - summary tables, detail tables, etc.
+
+    When we read it with pandas, everything comes as one big DataFrame.
+    We want ONLY the original data block, so we:
+      - look for the first row where *all* columns are NaN
+      - keep everything *above* that row.
+    """
+    mask_all_nan = df_full.isna().all(axis=1)
+    nan_rows = df_full[mask_all_nan]
+
+    if nan_rows.empty:
+        return df_full.reset_index(drop=True)
+
+    first_blank_idx = nan_rows.index[0]
+    data_df = df_full.loc[: first_blank_idx - 1].reset_index(drop=True)
+    return data_df
+
+
+def compute_counts_and_low(
+    df_team: pd.DataFrame,
+    question_index: int,
+):
+    """
+    For one question column in one team:
+
+    - counts: Series indexed 1..5 with counts
+    - avg: mean rating (or None if no data)
+    - low_entries: list of "Player Name, (X★)" for X in {1,2,3}
+    - question_name: column header text
+    """
+    cols = list(df_team.columns)
+    if question_index >= len(cols):
+        return pd.Series(dtype=float), None, [], ""
+
+    question_name = cols[question_index]
+
+    ratings = pd.to_numeric(df_team.iloc[:, question_index], errors="coerce")
+    valid = ratings.dropna()
+
+    counts = valid.value_counts().reindex([1, 2, 3, 4, 5], fill_value=0)
+    avg = float(valid.mean()) if not valid.empty else None
+
+    low_entries: list[str] = []
+    if PLAYER_NAME_INDEX < len(cols):
+        player_col = cols[PLAYER_NAME_INDEX]
+        for _, row in df_team.iterrows():
+            value = row.iloc[question_index]
+            if pd.isna(value):
+                continue
+            try:
+                rating_int = int(value)
+            except (ValueError, TypeError):
+                continue
+            if rating_int in (1, 2, 3):
+                name = str(row[player_col])
+                low_entries.append(f"{name}, ({rating_int}★)")
+
+    return counts, avg, low_entries, question_name
+
+
+def add_question_page(
+    pdf: PdfPages,
+    df_team: pd.DataFrame,
+    question_index: int,
+    team_label: str,
+    cycle_label: str,
+) -> None:
+    """
+    Create ONE PDF page for ONE star question for ONE team.
+
+    Layout: chart on top, table of 1–3 star reviews below it.
+    """
+    counts, avg, low_entries, question_name = compute_counts_and_low(
+        df_team, question_index
+    )
+
+    if question_name == "":
+        return
+
+    fig = plt.figure(figsize=(8.5, 11))  # US Letter
+    gs = fig.add_gridspec(nrows=3, ncols=1, height_ratios=[3, 0.3, 4])
+
+    ax_chart = fig.add_subplot(gs[0])
+    ax_table = fig.add_subplot(gs[2])
+    ax_table.axis("off")
+
+    x_vals = [1, 2, 3, 4, 5]
+    y_vals = [counts.get(x, 0) for x in x_vals]
+
+    ax_chart.bar(x_vals, y_vals)
+    ax_chart.set_xlabel("# of Stars")
+    ax_chart.set_ylabel("Player Count")
+
+    if avg is not None and not np.isnan(avg):
+        avg_text = f"{avg:.2f}"
+    else:
+        avg_text = "N/A"
+
+    chart_title = f"{question_name}  (Avg = {avg_text})"
+    ax_chart.set_title(chart_title, fontsize=12, pad=12)
+    ax_chart.set_xticks(x_vals)
+    ax_chart.set_ylim(0, max(y_vals + [1]) * 1.2)
+
+    ax_table.set_title("1–3 Star Reviews", fontsize=11, loc="left", pad=6)
+
+    if low_entries:
+        cell_text = [[entry] for entry in low_entries]
+        table = ax_table.table(
+            cellText=cell_text,
+            colLabels=["Player, (Rating)"],
+            loc="upper left",
+            cellLoc="left",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.1)
+    else:
+        ax_table.text(
+            0.0,
+            0.9,
+            "No 1–3 star reviews for this question.",
+            fontsize=10,
+            va="top",
+        )
+
+    fig.suptitle(
+        f"{team_label} – {cycle_label}",
+        fontsize=14,
+        y=0.98,
+    )
+
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def build_team_report(
+    df_team: pd.DataFrame,
+    output_pdf_path: str,
+    team_label: str,
+    cycle_label: str,
+) -> None:
+    """
+    Build a full PDF for ONE team (or 'All Teams'), one page per star question.
+    """
+    rating_indices = [
+        idx for idx in RATING_COL_INDICES if idx < len(df_team.columns)
+    ]
+    if not rating_indices:
+        return
+
+    with PdfPages(output_pdf_path) as pdf:
+        for q_idx in rating_indices:
+            add_question_page(pdf, df_team, q_idx, team_label, cycle_label)
+
+
+def create_pdf_reports_from_processed(
+    processed_excel_path: str,
+    cycle_label: str,
+    output_dir: str = "pdf_reports",
+) -> None:
+    """
+    Use the *processed* workbook (output of process_workbook) and generate:
+      - 'All Teams - Cycle X.pdf'
+      - '<Team Name> - Cycle X.pdf' for each team in column G.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    xls = pd.ExcelFile(processed_excel_path)
+    if "All_Data" in xls.sheet_names:
+        df_full = xls.parse("All_Data")
+    else:
+        df_full = xls.parse(0)
+
+    df_data = extract_data_block(df_full)
+
+    if GROUP_COL_INDEX >= len(df_data.columns):
+        raise ValueError(
+            "Group column index is outside available columns in the sheet."
+        )
+
+    group_col_name = df_data.columns[GROUP_COL_INDEX]
+    df_data[group_col_name] = df_data[group_col_name].fillna("UNASSIGNED")
+
+    # Overall "All Teams" report
+    all_label = "All Teams"
+    all_fname = f"{safe_filename(all_label)} - {cycle_label}.pdf"
+    all_path = os.path.join(output_dir, all_fname)
+    build_team_report(df_data, all_path, all_label, cycle_label)
+
+    # One report per team
+    for team_value, df_team in df_data.groupby(group_col_name, sort=True):
+        team_label = str(team_value)
+        fname = f"{safe_filename(team_label)} - {cycle_label}.pdf"
+        pdf_path = os.path.join(output_dir, fname)
+        build_team_report(df_team, pdf_path, team_label, cycle_label)
