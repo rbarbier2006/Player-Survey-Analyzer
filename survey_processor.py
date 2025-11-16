@@ -112,9 +112,11 @@ def append_summary_tables(
     if rating_cols:
         scores = list(range(1, 6))
         index = scores + ["Average"]
-        rating_summary = pd.DataFrame(index=index,
-                                      columns=rating_cols,
-                                      dtype=float)
+        rating_summary = pd.DataFrame(
+            index=index,
+            columns=rating_cols,
+            dtype=float,
+        )
 
         for col in rating_cols:
             series = df[col]
@@ -165,9 +167,11 @@ def append_summary_tables(
     # ----- Yes/No questions -----
     if yesno_cols:
         yesno_index = ["YES", "NO"]
-        yesno_summary = pd.DataFrame(index=yesno_index,
-                                     columns=yesno_cols,
-                                     dtype=float)
+        yesno_summary = pd.DataFrame(
+            index=yesno_index,
+            columns=yesno_cols,
+            dtype=float,
+        )
 
         for col in yesno_cols:
             series = df[col].astype(str).str.strip().str.upper()
@@ -403,8 +407,8 @@ def append_charts(
 
     At the very bottom of the sheet, create:
     - Column charts (histograms) for each rating question.
-    - Pie charts for each Yes/No question, showing "percent, count".
-    - A pie chart for the single-choice question in column O, also showing "percent, count".
+    - Pie charts for each Yes/No question, with labels "XX%, N".
+    - A pie chart for the single-choice question (column O), also with "XX%, N".
     """
     workbook = writer.book
     worksheet = writer.sheets[sheet_name]
@@ -461,34 +465,54 @@ def append_charts(
 
     # ----- Yes/No pie charts -----
     if yesno_info is not None and yesno_info.get("questions"):
-        y_start = yesno_info["startrow"]
-        cat_first_row = y_start + 1
-        cat_last_row = y_start + 2  # YES, NO
-        cat_col = 0  # "Response"
-
         row = startrow_bottom
         col = 0
 
         for q in yesno_info["questions"]:
-            chart = workbook.add_chart({"type": "pie"})
+            col_name = q["name"]
+            if col_name not in df.columns:
+                continue
+
+            series = df[col_name].astype(str).str.strip().str.upper()
+            yes_count = int((series == "YES").sum())
+            no_count = int((series == "NO").sum())
+            total = yes_count + no_count
+
+            if total == 0:
+                # Nothing to chart
+                continue
+
+            # Build custom labels "XX%, N"
+            yes_pct = 100.0 * yes_count / total
+            no_pct = 100.0 * no_count / total
+            custom_labels = [
+                {"value": f"{yes_pct:.0f}%, {yes_count}"},
+                {"value": f"{no_pct:.0f}%, {no_count}"},
+            ]
+
+            # Data for the pie chart comes from the YES/NO summary table
+            y_start = yesno_info["startrow"]
+            cat_first_row = y_start + 1
+            cat_last_row = y_start + 2  # YES, NO
+            cat_col = 0  # "Response"
             val_col = q["col_index"]
 
+            chart = workbook.add_chart({"type": "pie"})
             chart.add_series(
                 {
-                    "name": q["name"],
+                    "name": col_name,
                     "categories": [sheet_name, cat_first_row, cat_col,
                                    cat_last_row, cat_col],
                     "values": [sheet_name, cat_first_row, val_col,
                                cat_last_row, val_col],
                     "data_labels": {
-                        "percentage": True,
                         "value": True,
-                        "separator": ", ",
+                        "custom": custom_labels,
                     },
                 }
             )
 
-            chart.set_title({"name": q["name"]})
+            chart.set_title({"name": col_name})
             worksheet.insert_chart(row, col, chart)
 
             col += 8
@@ -504,6 +528,7 @@ def append_charts(
         table_startrow = row
         table_startcol = 0
 
+        # Write the Choice/Count table
         choice_df.to_excel(
             writer,
             sheet_name=sheet_name,
@@ -511,6 +536,16 @@ def append_charts(
             startcol=table_startcol,
             index=False,
         )
+
+        counts = choice_df["Count"].astype(int).tolist()
+        total = sum(counts)
+        if total > 0:
+            custom_labels = []
+            for c in counts:
+                pct = 100.0 * c / total
+                custom_labels.append({"value": f"{pct:.0f}%, {int(c)}"})
+        else:
+            custom_labels = [{"value": "0%, 0"} for _ in counts]
 
         chart = workbook.add_chart({"type": "pie"})
         choice_col_name = df.columns[CHOICE_COL_INDEX]
@@ -533,9 +568,8 @@ def append_charts(
                     table_startcol + 1,
                 ],
                 "data_labels": {
-                    "percentage": True,
                     "value": True,
-                    "separator": ", ",
+                    "custom": custom_labels,
                 },
             }
         )
@@ -547,6 +581,17 @@ def append_charts(
 def process_workbook(input_path: str, output_path: str = None) -> str:
     """
     Main function you will call.
+
+    - Reads the first sheet of the input Excel file.
+    - Groups rows by column G (team + category).
+    - Creates an output workbook with:
+      - Sheet 1: All data
+      - One sheet per group (team + category).
+    - On every sheet, appends:
+      - rating and yes/no summary tables
+      - "1-3 star reviews" names
+      - "NO replies" names
+      - column and pie charts at the very bottom
     """
     if output_path is None:
         base, ext = os.path.splitext(input_path)
