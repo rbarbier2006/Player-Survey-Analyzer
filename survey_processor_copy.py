@@ -1015,12 +1015,12 @@ def _add_group_tables_page_to_pdf(
     Page 2 for a group.
 
     For ALL TEAMS:
-      - 1–3 star reviews (columns = chart numbers)
+      - 1-3 star reviews (columns = chart numbers)
       - "NO" replies (columns = chart numbers)
       - Completion summary: how many players completed the survey
 
     For INDIVIDUAL TEAMS:
-      - 1–3 star reviews (columns = chart numbers)
+      - 1-3 star reviews (columns = chart numbers)
       - "NO" replies (columns = chart numbers)
       - Players who completed this survey (names in up to 6 columns)
       - Comments / suggestions (if any, from comment/suggestion columns)
@@ -1036,7 +1036,7 @@ def _add_group_tables_page_to_pdf(
         m["col_name"]: m["number"] for m in plots_meta if m["ptype"] == "yesno"
     }
 
-    # ----- 1–3 star reviews table (rename columns to chart numbers) -----
+    # ----- 1-3 star reviews table (rename columns to chart numbers) -----
     low_df = None
     if rating_indices:
         low_df = build_low_ratings_table(df_group, rating_indices, PLAYER_NAME_INDEX)
@@ -1137,7 +1137,7 @@ def _add_group_tables_page_to_pdf(
 
     row_idx = 0
 
-    # --------- 1–3 Star Reviews ----------
+    # --------- 1-3 Star Reviews ----------
     if low_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -1153,16 +1153,16 @@ def _add_group_tables_page_to_pdf(
 
         ncols_low = len(low_df.columns)
         if ncols_low <= 8:
-            width_scale = 1.0
+            width_scale = 1.35
         elif ncols_low <= 12:
-            width_scale = 0.85
+            width_scale = 1.15
         else:
-            width_scale = 0.7
-        # slightly smaller height so it doesn't run into the NO section
+            width_scale = 0.9
+        # slightly smaller height so it does not run into the NO section
         table.scale(width_scale, 1.15)
 
         ax.set_title(
-            "1–3 Star Reviews (columns = chart numbers)",
+            "1-3 Star Reviews (columns = chart numbers)",
             fontsize=10,
             pad=6,
         )
@@ -1182,12 +1182,12 @@ def _add_group_tables_page_to_pdf(
         table.set_fontsize(7)
 
         ncols_no = len(no_df.columns)
-        if ncols_no <= 6:
-            width_scale = 1.0
-        elif ncols_no <= 10:
-            width_scale = 0.9
+        if ncols_no <= 8:
+            width_scale = 1.35
+        elif ncols_no <= 12:
+            width_scale = 1.15
         else:
-            width_scale = 0.75
+            width_scale = 0.9
         table.scale(width_scale, 1.15)
 
         ax.set_title(
@@ -1239,11 +1239,11 @@ def _add_group_tables_page_to_pdf(
         )
         row_idx += 1
 
- # --------- Comments / Suggestions (team pages) ----------
+    # --------- Comments / Suggestions (team pages) ----------
     if not is_all_teams and comments_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
-    
+
         # Narrow player column, wide comment column
         table = ax.table(
             cellText=comments_df.values,
@@ -1251,44 +1251,47 @@ def _add_group_tables_page_to_pdf(
             loc="upper left",
             colWidths=[0.15, 0.85],  # 15% for name, 85% for comment
         )
-    
+
         table.auto_set_font_size(False)
         table.set_fontsize(8)
         # Taller rows so multi-line comments have space
         table.scale(1.0, 2.0)
-    
+
         # Align and wrap text properly
         for (r, c), cell in table.get_celld().items():
             if r == 0:
                 # header row: center
                 cell.set_text_props(ha="center", va="center")
                 continue
-    
+
             if c == 0:
-                # player name column – center is usually fine
+                # player name column
                 cell.set_text_props(ha="center", va="center")
             elif c == 1:
-                # comment column: LEFT align and WRAP to cell width
+                # comment column: left align and wrap to cell width
                 txt = cell.get_text()
                 txt.set_ha("left")
                 txt.set_va("center")
-                txt.set_wrap(True)   # let Matplotlib break lines at cell boundary
-                cell.PAD = 0.02      # small padding from left edge
-    
+                txt.set_wrap(True)
+                cell.PAD = 0.02  # small padding from left edge
+
         ax.set_title(
             "Comments and Suggestions",
             fontsize=10,
             pad=6,
         )
 
-
-
     # Global title + spacing
-    fig.suptitle(f"{title_label} – {cycle_label} (Details)", fontsize=12)
+    fig.suptitle(f"{title_label} - {cycle_label} (Details)", fontsize=12)
 
-    # More vertical gap between sections, and keep everything inside page
+    # Pack contents, then adjust vertical spacing.
     fig.tight_layout(rect=[0, 0.03, 1, 0.9])
-    fig.subplots_adjust(hspace=0.55)
+
+    if is_all_teams:
+        # Bigger gap between 1-3 and NO tables on the All Teams page
+        fig.subplots_adjust(hspace=0.65)
+    else:
+        fig.subplots_adjust(hspace=0.4)
 
     pdf.savefig(fig)
     plt.close(fig)
