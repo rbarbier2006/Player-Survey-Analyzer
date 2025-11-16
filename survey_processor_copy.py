@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from typing import Optional
+
 
 
 # Column layout based on your description
@@ -826,8 +828,9 @@ def _add_group_page_to_pdf(
 def create_pdf_from_original(
     input_path: str,
     cycle_label: str = "Cycle",
-    output_path: str | None = None,
+    output_path: Optional[str] = None,
 ) -> str:
+
     """
     Use the ORIGINAL survey Excel file and create a single PDF:
 
