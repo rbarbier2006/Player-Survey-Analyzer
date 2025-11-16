@@ -1282,17 +1282,17 @@ def create_pdf_from_original(
     with PdfPages(output_path) as pdf:
         # All teams combined
         all_meta = _build_plot_metadata(df)
-_add_group_charts_page_to_pdf(pdf, df, "All Teams", cycle_label, all_meta)
-_add_group_tables_page_to_pdf(
-    pdf, df, "All Teams", cycle_label, all_meta, is_all_teams=True
-)
-
-for group_value, group_df in df.groupby(group_col_name, sort=True):
-    title = str(group_value)
-    meta = _build_plot_metadata(group_df)
-    _add_group_charts_page_to_pdf(pdf, group_df, title, cycle_label, meta)
-    _add_group_tables_page_to_pdf(
-        pdf, group_df, title, cycle_label, meta, is_all_teams=False
-    )
+        _add_group_charts_page_to_pdf(pdf, df, "All Teams", cycle_label, all_meta)
+        _add_group_tables_page_to_pdf(
+            pdf, df, "All Teams", cycle_label, all_meta, is_all_teams=True
+        )
+        
+        for group_value, group_df in df.groupby(group_col_name, sort=True):
+            title = str(group_value)
+            meta = _build_plot_metadata(group_df)
+            _add_group_charts_page_to_pdf(pdf, group_df, title, cycle_label, meta)
+            _add_group_tables_page_to_pdf(
+                pdf, group_df, title, cycle_label, meta, is_all_teams=False
+        )
 
     return output_path
