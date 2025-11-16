@@ -319,6 +319,51 @@ def build_no_answers_table(
     return no_df
 
 
+def build_all_players_grid(
+    df_group: pd.DataFrame,
+    player_index: int,
+    max_rows_per_col: int = 25,
+    max_cols: int = 6,
+) -> Optional[pd.DataFrame]:
+    """
+    Build a table of all players in this group who completed the survey.
+
+    Names are unique and arranged into multiple columns so that the
+    table stays compact enough to fit on one PDF page.
+    """
+    cols = list(df_group.columns)
+    if player_index >= len(cols):
+        return None
+
+    names_series = (
+        df_group.iloc[:, player_index]
+        .dropna()
+        .astype(str)
+        .str.strip()
+    )
+    names = [n for n in names_series if n]
+    if not names:
+        return None
+
+    # Unique, sorted list
+    names = sorted(set(names))
+    total = len(names)
+
+    # Columns and rows for the grid
+    n_cols = min(max_cols, max(1, int(np.ceil(total / max_rows_per_col))))
+    n_rows = int(np.ceil(total / n_cols))
+
+    data: Dict[str, List[str]] = {}
+    for c in range(n_cols):
+        start = c * n_rows
+        end = start + n_rows
+        chunk = names[start:end]
+        chunk += [""] * (n_rows - len(chunk))
+        data[f"Players {c + 1}"] = chunk
+
+    return pd.DataFrame(data)
+
+
 def build_choice_counts(
     df: pd.DataFrame,
     choice_index: int,
@@ -682,7 +727,8 @@ def process_workbook(input_path: str, output_path: Optional[str] = None) -> str:
 # -------------------------------------------------------------------
 # PDF: TWO pages per group (All_Data + each team):
 #   Page 1: charts, numbered 1,2,3,...
-#   Page 2: 1-3-star and "NO" tables, with columns = chart numbers
+#   Page 2: 1-3-star and "NO" tables (columns = chart numbers),
+#           plus a list of players who completed the survey.
 # -------------------------------------------------------------------
 
 def _build_plot_metadata(df_group: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -766,8 +812,6 @@ def _add_group_charts_page_to_pdf(
     # Turn off any unused axes
     for ax in axes_flat[n_plots:]:
         ax.axis("off")
-
-    cols = list(df_group.columns)
 
     for ax, meta in zip(axes_flat, plots_meta):
         ptype = meta["ptype"]
@@ -890,7 +934,9 @@ def _add_group_tables_page_to_pdf(
     """
     Page 2 for a group:
     - Top table: all 1–3-star reviews (using chart numbers as column headers)
-    - Bottom table: all NO replies to Yes/No questions (also by chart number)
+    - Middle table: all NO replies to Yes/No questions (also by chart number)
+    - Bottom table: all players who completed the survey for this group
+                    (names spread across multiple columns)
     """
     # Extract indices and number mappings from meta
     rating_indices = [m["idx"] for m in plots_meta if m["ptype"] == "rating"]
@@ -935,14 +981,14 @@ def _add_group_tables_page_to_pdf(
                     rename_cols2[col] = str(num)
             no_df = no_df.rename(columns=rename_cols2)
 
-    if low_df is None and no_df is None:
+    # All players who completed the survey (this group)
+    players_df = build_all_players_grid(df_group, PLAYER_NAME_INDEX)
+
+    if low_df is None and no_df is None and players_df is None:
         return  # nothing to show
 
-    # Decide whether we need one or two subplots
-    if low_df is not None and no_df is not None:
-        nrows = 2
-    else:
-        nrows = 1
+    # Decide how many subplots (sections) we need
+    nrows = sum(x is not None for x in [low_df, no_df, players_df])
 
     # Landscape page (more horizontal space)
     fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(11, 8.5))
@@ -951,6 +997,7 @@ def _add_group_tables_page_to_pdf(
 
     row_idx = 0
 
+    # ----- 1–3 star reviews -----
     if low_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -973,6 +1020,7 @@ def _add_group_tables_page_to_pdf(
         )
         row_idx += 1
 
+    # ----- "NO" replies -----
     if no_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -990,6 +1038,29 @@ def _add_group_tables_page_to_pdf(
 
         ax.set_title(
             '"NO" Replies (columns = chart numbers)',
+            fontsize=9,
+            pad=6,
+        )
+        row_idx += 1
+
+    # ----- All players list -----
+    if players_df is not None:
+        ax = axes[row_idx]
+        ax.axis("off")
+        table = ax.table(
+            cellText=players_df.values,
+            colLabels=players_df.columns,
+            loc="upper left",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(6)
+
+        ncols_players = len(players_df.columns)
+        width_scale = min(1.0, 8.0 / max(ncols_players, 1))
+        table.scale(width_scale, 1.1)
+
+        ax.set_title(
+            "Players who completed this survey",
             fontsize=9,
             pad=6,
         )
@@ -1011,7 +1082,8 @@ def create_pdf_from_original(
     For "All Teams" and for each individual team:
     - Page 1: all charts for that group, numbered 1,2,3,...
     - Page 2: tables with 1–3 star reviews and "NO" replies,
-              with columns labelled by chart number.
+              plus a table with all players who completed the survey,
+              with columns labelled by chart number where applicable.
     """
     if output_path is None:
         base, _ = os.path.splitext(input_path)
