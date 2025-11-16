@@ -5,7 +5,7 @@ import tempfile
 
 import streamlit as st
 
-from survey_processor import process_workbook, create_pdf_from_original
+from survey_processor.copy import process_workbook, create_pdf_from_original
 
 
 def main():
