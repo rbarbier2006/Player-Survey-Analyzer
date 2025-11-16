@@ -1,13 +1,14 @@
-#survey_processor_copy.py
+# survey_processor_copy.py
 
 import os
 import re
+import textwrap
+from typing import Optional, List, Dict, Any
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import textwrap
 from matplotlib.backends.backend_pdf import PdfPages
-from typing import Optional
 
 
 # Column layout based on your description
@@ -218,7 +219,7 @@ def build_low_ratings_table(
     df: pd.DataFrame,
     rating_indices,
     player_index,
-):
+) -> Optional[pd.DataFrame]:
     """
     Build a table listing all 1, 2, and 3 star answers.
 
@@ -230,13 +231,13 @@ def build_low_ratings_table(
         return None
 
     player_col = cols[player_index]
-    low_lists = {}
+    low_lists: Dict[str, List[str]] = {}
 
     for idx in rating_indices:
         if idx >= len(cols):
             continue
         col = cols[idx]
-        entries = []
+        entries: List[str] = []
 
         for _, row in df.iterrows():
             value = row.iloc[idx]
@@ -259,7 +260,7 @@ def build_low_ratings_table(
     if max_len == 0:
         return None
 
-    data = {}
+    data: Dict[str, List[str]] = {}
     for question, vals in low_lists.items():
         padded = vals + [""] * (max_len - len(vals))
         data[question] = padded
@@ -272,7 +273,7 @@ def build_no_answers_table(
     df: pd.DataFrame,
     yesno_indices,
     player_index,
-) -> pd.DataFrame | None:
+) -> Optional[pd.DataFrame]:
     """
     Build a table listing all 'NO' answers for Yes/No questions.
 
@@ -283,13 +284,13 @@ def build_no_answers_table(
         return None
 
     player_col = cols[player_index]
-    no_lists: dict[str, list[str]] = {}
+    no_lists: Dict[str, List[str]] = {}
 
     for idx in yesno_indices:
         if idx >= len(cols):
             continue
         col = cols[idx]
-        entries: list[str] = []
+        entries: List[str] = []
 
         for _, row in df.iterrows():
             value = row.iloc[idx]
@@ -309,7 +310,7 @@ def build_no_answers_table(
     if max_len == 0:
         return None
 
-    data = {}
+    data: Dict[str, List[str]] = {}
     for question, vals in no_lists.items():
         padded = vals + [""] * (max_len - len(vals))
         data[question] = padded
@@ -321,7 +322,7 @@ def build_no_answers_table(
 def build_choice_counts(
     df: pd.DataFrame,
     choice_index: int,
-) -> pd.DataFrame | None:
+) -> Optional[pd.DataFrame]:
     """
     Build a frequency table for the single-choice question (column O).
 
@@ -583,7 +584,7 @@ def append_charts(
         worksheet.insert_chart(table_startrow, table_startcol + 4, chart)
 
 
-def process_workbook(input_path: str, output_path: str = None) -> str:
+def process_workbook(input_path: str, output_path: Optional[str] = None) -> str:
     """
     Main function you will call.
 
@@ -684,7 +685,7 @@ def process_workbook(input_path: str, output_path: str = None) -> str:
 #   Page 2: 1-3-star and "NO" tables, with columns = chart numbers
 # -------------------------------------------------------------------
 
-def _build_plot_metadata(df_group: pd.DataFrame) -> list[dict]:
+def _build_plot_metadata(df_group: pd.DataFrame) -> List[Dict[str, Any]]:
     """
     For a given group (All teams or a single team), build metadata
     for every plot we want to draw, and assign it a number
@@ -696,7 +697,7 @@ def _build_plot_metadata(df_group: pd.DataFrame) -> list[dict]:
     yesno_indices = [idx for idx in YESNO_COL_INDICES if idx < len(cols)]
     has_choice = CHOICE_COL_INDEX < len(cols)
 
-    meta: list[dict] = []
+    meta: List[Dict[str, Any]] = []
     number = 1  # restart numbering for each group
 
     for idx in rating_indices:
@@ -739,7 +740,7 @@ def _add_group_charts_page_to_pdf(
     df_group: pd.DataFrame,
     title_label: str,
     cycle_label: str,
-    plots_meta: list[dict],
+    plots_meta: List[Dict[str, Any]],
 ) -> None:
     """
     Page 1 for a group: all charts laid out in a grid, each labelled
@@ -774,7 +775,7 @@ def _add_group_charts_page_to_pdf(
         col_name = meta["col_name"]
         number = meta["number"]
 
-        # Put the big chart number in the top-left
+        # Big chart number in top-left
         ax.text(
             0.02,
             0.98,
@@ -786,7 +787,7 @@ def _add_group_charts_page_to_pdf(
             fontweight="bold",
         )
 
-        # Wrap the question text so titles don't overlap
+        # Wrap question text so titles don't overlap
         wrapped_name = textwrap.fill(col_name, width=40)
 
         if ptype == "rating":
@@ -884,15 +885,12 @@ def _add_group_tables_page_to_pdf(
     df_group: pd.DataFrame,
     title_label: str,
     cycle_label: str,
-    plots_meta: list[dict],
+    plots_meta: List[Dict[str, Any]],
 ) -> None:
     """
     Page 2 for a group:
     - Top table: all 1–3-star reviews (using chart numbers as column headers)
     - Bottom table: all NO replies to Yes/No questions (also by chart number)
-
-    This version uses a landscape page and dynamically shrinks the table
-    so that many columns still fit on one page.
     """
     # Extract indices and number mappings from meta
     rating_indices = [m["idx"] for m in plots_meta if m["ptype"] == "rating"]
@@ -909,12 +907,12 @@ def _add_group_tables_page_to_pdf(
         if m["ptype"] == "yesno"
     }
 
-    # 1–3 star reviews table, but rename question columns to chart numbers
+    # 1–3 star reviews table, rename question columns to chart numbers
     low_df = None
     if rating_indices:
         low_df = build_low_ratings_table(df_group, rating_indices, PLAYER_NAME_INDEX)
         if low_df is not None:
-            rename_cols = {}
+            rename_cols: Dict[str, str] = {}
             for col in low_df.columns:
                 if col == "1-3 Star Reviews":
                     continue
@@ -928,14 +926,14 @@ def _add_group_tables_page_to_pdf(
     if yesno_indices:
         no_df = build_no_answers_table(df_group, yesno_indices, PLAYER_NAME_INDEX)
         if no_df is not None:
-            rename_cols = {}
+            rename_cols2: Dict[str, str] = {}
             for col in no_df.columns:
                 if col == "NO Replies":
                     continue
                 num = yesno_number_by_name.get(col)
                 if num is not None:
-                    rename_cols[col] = str(num)
-            no_df = no_df.rename(columns=rename_cols)
+                    rename_cols2[col] = str(num)
+            no_df = no_df.rename(columns=rename_cols2)
 
     if low_df is None and no_df is None:
         return  # nothing to show
@@ -946,7 +944,7 @@ def _add_group_tables_page_to_pdf(
     else:
         nrows = 1
 
-    # LANDSCAPE page to give more horizontal space
+    # Landscape page (more horizontal space)
     fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(11, 8.5))
     if nrows == 1:
         axes = [axes]
@@ -964,13 +962,12 @@ def _add_group_tables_page_to_pdf(
         table.auto_set_font_size(False)
         table.set_fontsize(6)
 
-        # shrink width when there are many columns so everything fits
         ncols_low = len(low_df.columns)
-        width_scale = min(1.0, 6.0 / max(ncols_low, 1))  # <= 1 when many cols
+        width_scale = min(1.0, 6.0 / max(ncols_low, 1))
         table.scale(width_scale, 1.1)
 
         ax.set_title(
-            "1–3 Star Reviews (columns = chart numbers)",
+            "1-3 Star Reviews (columns = chart numbers)",
             fontsize=9,
             pad=6,
         )
@@ -1002,4 +999,45 @@ def _add_group_tables_page_to_pdf(
     pdf.savefig(fig)
     plt.close(fig)
 
-  return output_path
+
+def create_pdf_from_original(
+    input_path: str,
+    cycle_label: str = "Cycle",
+    output_path: Optional[str] = None,
+) -> str:
+    """
+    Use the ORIGINAL survey Excel file and create a multi-page PDF:
+
+    For "All Teams" and for each individual team:
+    - Page 1: all charts for that group, numbered 1,2,3,...
+    - Page 2: tables with 1–3 star reviews and "NO" replies,
+              with columns labelled by chart number.
+    """
+    if output_path is None:
+        base, _ = os.path.splitext(input_path)
+        output_path = base + "_report.pdf"
+
+    df = pd.read_excel(input_path, sheet_name=0)
+
+    if GROUP_COL_INDEX >= len(df.columns):
+        raise ValueError(
+            "Group column G is outside the available columns in the sheet."
+        )
+
+    group_col_name = df.columns[GROUP_COL_INDEX]
+    df[group_col_name] = df[group_col_name].fillna("UNASSIGNED")
+
+    with PdfPages(output_path) as pdf:
+        # All teams combined
+        all_meta = _build_plot_metadata(df)
+        _add_group_charts_page_to_pdf(pdf, df, "All Teams", cycle_label, all_meta)
+        _add_group_tables_page_to_pdf(pdf, df, "All Teams", cycle_label, all_meta)
+
+        # One set of 2 pages per team
+        for group_value, group_df in df.groupby(group_col_name, sort=True):
+            title = str(group_value)
+            meta = _build_plot_metadata(group_df)
+            _add_group_charts_page_to_pdf(pdf, group_df, title, cycle_label, meta)
+            _add_group_tables_page_to_pdf(pdf, group_df, title, cycle_label, meta)
+
+    return output_path
