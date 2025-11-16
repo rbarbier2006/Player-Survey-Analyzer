@@ -890,6 +890,9 @@ def _add_group_tables_page_to_pdf(
     Page 2 for a group:
     - Top table: all 1–3-star reviews (using chart numbers as column headers)
     - Bottom table: all NO replies to Yes/No questions (also by chart number)
+
+    This version uses a landscape page and dynamically shrinks the table
+    so that many columns still fit on one page.
     """
     # Extract indices and number mappings from meta
     rating_indices = [m["idx"] for m in plots_meta if m["ptype"] == "rating"]
@@ -943,7 +946,8 @@ def _add_group_tables_page_to_pdf(
     else:
         nrows = 1
 
-    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(8.5, 11))
+    # LANDSCAPE page to give more horizontal space
+    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(11, 8.5))
     if nrows == 1:
         axes = [axes]
 
@@ -959,7 +963,12 @@ def _add_group_tables_page_to_pdf(
         )
         table.auto_set_font_size(False)
         table.set_fontsize(6)
-        table.auto_set_column_width(col=list(range(len(low_df.columns))))
+
+        # shrink width when there are many columns so everything fits
+        ncols_low = len(low_df.columns)
+        width_scale = min(1.0, 6.0 / max(ncols_low, 1))  # <= 1 when many cols
+        table.scale(width_scale, 1.1)
+
         ax.set_title(
             "1–3 Star Reviews (columns = chart numbers)",
             fontsize=9,
@@ -977,7 +986,11 @@ def _add_group_tables_page_to_pdf(
         )
         table.auto_set_font_size(False)
         table.set_fontsize(6)
-        table.auto_set_column_width(col=list(range(len(no_df.columns))))
+
+        ncols_no = len(no_df.columns)
+        width_scale = min(1.0, 6.0 / max(ncols_no, 1))
+        table.scale(width_scale, 1.1)
+
         ax.set_title(
             '"NO" Replies (columns = chart numbers)',
             fontsize=9,
@@ -989,50 +1002,3 @@ def _add_group_tables_page_to_pdf(
     pdf.savefig(fig)
     plt.close(fig)
 
-
-def create_pdf_from_original(
-    input_path: str,
-    cycle_label: str = "Cycle",
-    output_path: Optional[str] = None,
-) -> str:
-    """
-    Use the ORIGINAL survey Excel file and create a PDF:
-
-    For All Teams + each team:
-      - Page 1: charts grid (numbered 1,2,3,... per team)
-      - Page 2: detail tables (1–3-star and NO replies)
-    """
-    if output_path is None:
-        base, _ = os.path.splitext(input_path)
-        output_path = base + "_report.pdf"
-
-    # Read original data
-    df = pd.read_excel(input_path, sheet_name=0)
-
-    if GROUP_COL_INDEX >= len(df.columns):
-        raise ValueError(
-            "Group column G is outside the available columns in the sheet."
-        )
-
-    group_col_name = df.columns[GROUP_COL_INDEX]
-    df[group_col_name] = df[group_col_name].fillna("UNASSIGNED")
-
-    with PdfPages(output_path) as pdf:
-        # All teams
-        meta_all = _build_plot_metadata(df)
-        _add_group_charts_page_to_pdf(pdf, df, "All Teams", cycle_label, meta_all)
-        _add_group_tables_page_to_pdf(pdf, df, "All Teams", cycle_label, meta_all)
-
-        # One pair of pages per team
-        for group_value, group_df in df.groupby(group_col_name, sort=True):
-            title_label = str(group_value)
-            meta = _build_plot_metadata(group_df)
-
-            _add_group_charts_page_to_pdf(
-                pdf, group_df, title_label, cycle_label, meta
-            )
-            _add_group_tables_page_to_pdf(
-                pdf, group_df, title_label, cycle_label, meta
-            )
-
-    return output_path
