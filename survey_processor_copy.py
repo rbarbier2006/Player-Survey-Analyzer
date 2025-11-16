@@ -935,7 +935,7 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
     (case-insensitive). For each non-empty cell in those columns, we
     create a row: Player | Comment / Suggestion.
 
-    Long comments are wrapped so they don't overlap in the PDF.
+    Long comments are wrapped so they don't overflow the cell.
     """
     if PLAYER_NAME_INDEX >= len(df_group.columns):
         return None
@@ -967,7 +967,6 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
                 continue
 
             col_label = cols[idx]
-            # If there are multiple comment columns, prefix with which one
             if len(comment_indices) > 1:
                 text_final = f"[{col_label}] {text}"
             else:
@@ -980,14 +979,14 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
 
     comments_df = pd.DataFrame(rows, columns=["Player", "Comment / Suggestion"])
 
-    # Wrap long comments to avoid horizontal overlap in table cells (PDF only).
-    # Excel output still gets the raw text; wrapping happens later when
-    # we build the matplotlib table.
+    # Wrap more tightly so each line fits the cell width
+    # (smaller width -> more lines -> no horizontal clipping)
     comments_df["Comment / Suggestion"] = comments_df[
         "Comment / Suggestion"
-    ].apply(lambda s: textwrap.fill(str(s), width=60))
+    ].apply(lambda s: textwrap.fill(str(s), width=40))
 
     return comments_df
+
 
 
 def _wrap_df_cells(df: pd.DataFrame, width: int) -> pd.DataFrame:
@@ -1098,30 +1097,19 @@ def _add_group_tables_page_to_pdf(
     ):
         return
 
-    # ----- Wrap text inside cells for PDF so nothing overflows -----
-    low_df_wrapped = _wrap_df_cells(low_df, width=18) if low_df is not None else None
-    no_df_wrapped = _wrap_df_cells(no_df, width=18) if no_df is not None else None
-    players_df_wrapped = (
-        _wrap_df_cells(players_df, width=18) if players_df is not None else None
-    )
-    # comments_df is already pre-wrapped to width ~60, but wrap again just in case.
-    comments_df_wrapped = (
-        _wrap_df_cells(comments_df, width=60) if comments_df is not None else None
-    )
-
     # ----- Decide sections and relative heights -----
     sections: List[str] = []
-    if low_df_wrapped is not None:
+    if low_df is not None:
         sections.append("low")
-    if no_df_wrapped is not None:
+    if no_df is not None:
         sections.append("no")
     if is_all_teams:
         if completion_df is not None:
             sections.append("completion")
     else:
-        if players_df_wrapped is not None:
+        if players_df is not None:
             sections.append("players")
-        if comments_df_wrapped is not None:
+        if comments_df is not None:
             sections.append("comments")
 
     nrows = len(sections)
@@ -1129,15 +1117,17 @@ def _add_group_tables_page_to_pdf(
     height_ratios: List[float] = []
     for s in sections:
         if s == "low":
-            height_ratios.append(1.2)       # a bit more room for all the names
+            # slightly shorter so there is more gap before the NO table
+            height_ratios.append(1.0)
         elif s == "no":
-            height_ratios.append(0.9)
+            height_ratios.append(1.0)
         elif s == "completion":
-            height_ratios.append(0.7)
+            height_ratios.append(0.8)
         elif s == "players":
             height_ratios.append(1.3)
         elif s == "comments":
-            height_ratios.append(1.7)
+            # extra space for wrapped comments
+            height_ratios.append(2.0)
 
     fig, axes = plt.subplots(
         nrows=nrows,
@@ -1151,59 +1141,62 @@ def _add_group_tables_page_to_pdf(
     row_idx = 0
 
     # --------- 1–3 Star Reviews ----------
-    if low_df_wrapped is not None:
+    if low_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
 
         table = ax.table(
-            cellText=low_df_wrapped.values,
-            colLabels=low_df_wrapped.columns,
+            cellText=low_df.values,
+            colLabels=low_df.columns,
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(7)  # smaller so long names fit
-        # Slightly wider and taller cells
-        ncols_low = len(low_df_wrapped.columns)
+        # smaller font so long names fit
+        table.set_fontsize(7)
+
+        ncols_low = len(low_df.columns)
         if ncols_low <= 8:
-            width_scale = 1.05
+            width_scale = 1.0
         elif ncols_low <= 12:
-            width_scale = 0.9
+            width_scale = 0.85
         else:
-            width_scale = 0.75
-        table.scale(width_scale, 1.5)
+            width_scale = 0.7
+        # slightly smaller height so it doesn't run into the NO section
+        table.scale(width_scale, 1.15)
 
         ax.set_title(
             "1–3 Star Reviews (columns = chart numbers)",
             fontsize=10,
-            pad=4,
+            pad=6,
         )
         row_idx += 1
 
     # --------- "NO" Replies ----------
-    if no_df_wrapped is not None:
+    if no_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
 
         table = ax.table(
-            cellText=no_df_wrapped.values,
-            colLabels=no_df_wrapped.columns,
+            cellText=no_df.values,
+            colLabels=no_df.columns,
             loc="upper left",
         )
         table.auto_set_font_size(False)
         table.set_fontsize(7)
-        ncols_no = len(no_df_wrapped.columns)
+
+        ncols_no = len(no_df.columns)
         if ncols_no <= 6:
-            width_scale = 1.05
+            width_scale = 1.0
         elif ncols_no <= 10:
             width_scale = 0.9
         else:
             width_scale = 0.75
-        table.scale(width_scale, 1.5)
+        table.scale(width_scale, 1.15)
 
         ax.set_title(
             '"NO" Replies (columns = chart numbers)',
             fontsize=10,
-            pad=4,
+            pad=6,
         )
         row_idx += 1
 
@@ -1218,7 +1211,7 @@ def _add_group_tables_page_to_pdf(
             loc="center",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(10)
+        table.set_fontsize(11)
         table.scale(1.2, 1.5)
 
         ax.set_title(
@@ -1229,18 +1222,18 @@ def _add_group_tables_page_to_pdf(
         row_idx += 1
 
     # --------- Players who completed this survey (team pages) ----------
-    if not is_all_teams and players_df_wrapped is not None:
+    if not is_all_teams and players_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
 
         table = ax.table(
-            cellText=players_df_wrapped.values,
-            colLabels=players_df_wrapped.columns,
+            cellText=players_df.values,
+            colLabels=players_df.columns,
             loc="upper left",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(7)
-        table.scale(1.05, 1.6)
+        table.set_fontsize(8)
+        table.scale(1.0, 1.5)
 
         ax.set_title(
             "Players who completed this survey",
@@ -1250,34 +1243,38 @@ def _add_group_tables_page_to_pdf(
         row_idx += 1
 
     # --------- Comments / Suggestions (team pages) ----------
-    if not is_all_teams and comments_df_wrapped is not None:
+    if not is_all_teams and comments_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
 
+        # Wider comment column, narrower player column
         table = ax.table(
-            cellText=comments_df_wrapped.values,
-            colLabels=comments_df_wrapped.columns,
+            cellText=comments_df.values,
+            colLabels=comments_df.columns,
             loc="upper left",
+            colWidths=[0.22, 0.78],  # about 22% for name, 78% for comment
         )
         table.auto_set_font_size(False)
         table.set_fontsize(7)
-        # Slightly narrower columns, taller rows for readability
-        table.scale(1.0, 2.0)
+        # Taller rows so wrapped comments have room
+        table.scale(1.1, 1.8)
 
         ax.set_title(
             "Comments and Suggestions",
             fontsize=10,
-            pad=4,
+            pad=6,
         )
 
     # Global title + spacing
     fig.suptitle(f"{title_label} – {cycle_label} (Details)", fontsize=12)
-    fig.tight_layout(rect=[0, 0, 1, 0.92])
-    # A little more vertical space between sections so they never touch
-    fig.subplots_adjust(hspace=0.4)
+
+    # More vertical gap between sections, and keep everything inside page
+    fig.tight_layout(rect=[0, 0.03, 1, 0.9])
+    fig.subplots_adjust(hspace=0.55)
 
     pdf.savefig(fig)
     plt.close(fig)
+
 
 
 
