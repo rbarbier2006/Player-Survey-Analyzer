@@ -82,18 +82,18 @@ This app will:
                 mime="application/pdf",
             )
 
-def main():
-    # ... all your existing app code ...
-    # buttons, file upload, results, etc.
 
-    # -------------- FOOTER --------------
-    st.markdown("---")
-    st.markdown(
-        "<p style='text-align: center; font-size: 0.9rem; color: #666666;'>"
-        "Program Developed by Rene Barbier for Soccer Central"
-        "</p>",
-        unsafe_allow_html=True,
-    )
+        # ... all your existing app code ...
+        # buttons, file upload, results, etc.
+    
+        # -------------- FOOTER --------------
+        st.markdown("---")
+        st.markdown(
+            "<p style='text-align: center; font-size: 0.9rem; color: #666666;'>"
+            "Program Developed by Rene Barbier for Soccer Central"
+            "</p>",
+            unsafe_allow_html=True,
+        )
 
 
 
