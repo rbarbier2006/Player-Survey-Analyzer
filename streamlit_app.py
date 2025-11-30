@@ -5,8 +5,9 @@ import tempfile
 
 import streamlit as st
 
-from survey_processor_copy import process_workbook, create_pdf_from_original
-
+#from survey_processor_copy import process_workbook, create_pdf_from_original
+from excel_processor import process_workbook
+from pdf_report import create_pdf_from_original
 
 def main():
     st.title("Player Survey Analyzer")
