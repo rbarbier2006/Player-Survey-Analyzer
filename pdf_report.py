@@ -514,14 +514,14 @@ def _add_group_tables_page_to_pdf(
 
     # "NO" Replies (placed clearly below the 1-3 table)
         if no_df is not None:
-        ax = axes[row_idx]
-        ax.axis("off")
-
-        table = ax.table(
-            cellText=no_df.values,
-            colLabels=no_labels if no_labels is not None else no_df.columns,
-            loc="upper left",
-        )
+            ax = axes[row_idx]
+            ax.axis("off")
+    
+            table = ax.table(
+                cellText=no_df.values,
+                colLabels=no_labels if no_labels is not None else no_df.columns,
+                loc="upper left",
+            )
 
         table.auto_set_font_size(False)
         table.set_fontsize(7)
