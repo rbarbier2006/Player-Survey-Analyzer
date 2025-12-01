@@ -718,6 +718,128 @@ def _add_group_tables_page_to_pdf(
     pdf.savefig(fig)
     plt.close(fig)
 
+def _add_cycle_summary_page(
+    pdf: PdfPages,
+    df: pd.DataFrame,
+    group_col_name: str,
+    cycle_label: str,
+) -> None:
+    """
+    First page of the PDF.
+
+    Ranks teams by:
+      1) how many players completed the survey (descending)
+      2) Overall Experience (question 7) average (descending) as tiebreaker
+
+    Lines look like:
+      1. Team - Coach: 3 players; Overall Experience: 4.33
+    """
+    cols = list(df.columns)
+
+    # Figure out which column is "Overall Experience" (chart 7):
+    rating_indices = [idx for idx in RATING_COL_INDICES if idx < len(cols)]
+    overall_idx = rating_indices[6] if len(rating_indices) >= 7 else None  # 0-based
+
+    summary_rows: List[Dict[str, Any]] = []
+
+    for group_value, group_df in df.groupby(group_col_name, sort=True):
+        team_name = str(group_value).strip()
+        if team_name == "UNASSIGNED":
+            # Skip fake / missing teams in the summary
+            continue
+
+        # Number of players who completed the survey
+        if PLAYER_NAME_INDEX < len(group_df.columns):
+            names = (
+                group_df.iloc[:, PLAYER_NAME_INDEX]
+                .dropna()
+                .astype(str)
+                .str.strip()
+            )
+            names = names[names != ""]
+            n_players = int(names.nunique())
+        else:
+            n_players = 0
+
+        # Average "Overall Experience" (Q7) for this team
+        if overall_idx is not None and overall_idx < len(group_df.columns):
+            series = pd.to_numeric(
+                group_df.iloc[:, overall_idx], errors="coerce"
+            ).dropna()
+            avg_q7 = float(series.mean()) if not series.empty else np.nan
+        else:
+            avg_q7 = np.nan
+
+        # Look up coach; default to "?"
+        coach_name = TEAM_COACH_MAP.get(team_name, "?")
+
+        summary_rows.append(
+            {
+                "Team": team_name,
+                "Coach": coach_name,
+                "Players": n_players,
+                "OverallExp": avg_q7,
+            }
+        )
+
+    if not summary_rows:
+        return
+
+    summary_df = pd.DataFrame(summary_rows)
+
+    # Rank: more players first, then higher Overall Experience
+    summary_df = summary_df.sort_values(
+        by=["Players", "OverallExp"],
+        ascending=[False, False],
+        ignore_index=True,
+    )
+
+    # --------- Draw the page ---------
+    fig, ax = plt.subplots(figsize=(8.5, 11))  # portrait
+    ax.axis("off")
+
+    # Title: "Cycle X Summary"
+    fig.suptitle(f"{cycle_label} Summary", fontsize=14, fontweight="bold")
+
+    y = 0.9
+    line_height = 0.035
+
+    for i, row in summary_df.iterrows():
+        rank = i + 1
+        team = row["Team"]
+        coach = row["Coach"]
+        players = int(row["Players"])
+
+        if pd.isna(row["OverallExp"]):
+            oe_str = "N/A"
+        else:
+            oe_str = f"{row['OverallExp']:.2f}"
+
+        players_word = "player" if players == 1 else "players"
+
+        text = (
+            f"{rank}. {team} - {coach}: "
+            f"{players} {players_word}; Overall Experience: {oe_str}"
+        )
+
+        ax.text(
+            0.04,
+            y,
+            text,
+            fontsize=9,
+            ha="left",
+            va="top",
+            transform=ax.transAxes,
+        )
+
+        y -= line_height
+        if y < 0.05:
+            # Safety: stop if we run off the page
+            break
+
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    pdf.savefig(fig)
+    plt.close(fig)
 
 
 def create_pdf_from_original(
@@ -728,10 +850,11 @@ def create_pdf_from_original(
     """
     Use the ORIGINAL survey Excel file and create a multi-page PDF:
 
-    For "All Teams" and for each individual team:
-    - Page 1: all charts for that group, numbered 1,2,3,...
-    - Page 2: tables with 1-3 star reviews and "NO" replies,
-              plus a list of players and comments for team pages.
+    Page 1: Cycle summary (ranked teams)
+    Then for "All Teams" and for each individual team:
+      - Page 1: all charts for that group, numbered 1,2,3,...
+      - Page 2: tables with 1–2 or 1–3 star reviews and "NO" replies,
+                plus a list of players and comments for team pages.
     """
     if output_path is None:
         base, _ = os.path.splitext(input_path)
@@ -746,24 +869,23 @@ def create_pdf_from_original(
 
     group_col_name = df.columns[GROUP_COL_INDEX]
     df[group_col_name] = df[group_col_name].fillna("UNASSIGNED")
-    
+
     with PdfPages(output_path) as pdf:
-        # All teams combined (keep as-is: no coach name)
+        # --------- NEW: global summary page ---------
+        _add_cycle_summary_page(pdf, df, group_col_name, cycle_label)
+
+        # --------- All teams combined ---------
         all_meta = _build_plot_metadata(df)
         _add_group_charts_page_to_pdf(pdf, df, "All Teams", cycle_label, all_meta)
         _add_group_tables_page_to_pdf(
             pdf, df, "All Teams", cycle_label, all_meta, is_all_teams=True
         )
 
-        # Each team
+        # --------- Each team (two pages each) ---------
         for group_value, group_df in df.groupby(group_col_name, sort=True):
             team_name = str(group_value).strip()
 
-            # Look up coach; default to "?" if not found
             coach_name = TEAM_COACH_MAP.get(team_name, "?")
-
-            # This becomes "Team - Coach" and then the suptitle
-            # function will add "- Cycle X" on top of it.
             title_label = f"{team_name} - {coach_name}"
 
             meta = _build_plot_metadata(group_df)
@@ -775,3 +897,5 @@ def create_pdf_from_original(
             )
 
     return output_path
+
+
