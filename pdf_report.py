@@ -734,12 +734,6 @@ def _add_cycle_summary_page(
     Lines look like:
       1. Team - Coach: 3 players; Overall Experience: 4.33
     """
-    cols = list(df.columns)
-
-    # Figure out which column is "Overall Experience" (chart 7):
-    rating_indices = [idx for idx in RATING_COL_INDICES if idx < len(cols)]
-    overall_idx = rating_indices[6] if len(rating_indices) >= 7 else None  # 0-based
-
     summary_rows: List[Dict[str, Any]] = []
 
     for group_value, group_df in df.groupby(group_col_name, sort=True):
@@ -748,7 +742,7 @@ def _add_cycle_summary_page(
             # Skip fake / missing teams in the summary
             continue
 
-        # Number of players who completed the survey
+        # ---------- number of players ----------
         if PLAYER_NAME_INDEX < len(group_df.columns):
             names = (
                 group_df.iloc[:, PLAYER_NAME_INDEX]
@@ -761,7 +755,14 @@ def _add_cycle_summary_page(
         else:
             n_players = 0
 
-        # Average "Overall Experience" (Q7) for this team
+        # ---------- find Overall Experience (chart #7) ----------
+        meta = _build_plot_metadata(group_df)
+        overall_idx: Optional[int] = None
+        for m in meta:
+            if m["ptype"] == "rating" and m["number"] == 7:
+                overall_idx = m["idx"]
+                break
+
         if overall_idx is not None and overall_idx < len(group_df.columns):
             series = pd.to_numeric(
                 group_df.iloc[:, overall_idx], errors="coerce"
@@ -770,7 +771,7 @@ def _add_cycle_summary_page(
         else:
             avg_q7 = np.nan
 
-        # Look up coach; default to "?"
+        # ---------- coach lookup ----------
         coach_name = TEAM_COACH_MAP.get(team_name, "?")
 
         summary_rows.append(
@@ -788,17 +789,18 @@ def _add_cycle_summary_page(
     summary_df = pd.DataFrame(summary_rows)
 
     # Rank: more players first, then higher Overall Experience
+    # Use a filled column so NaNs sort last.
+    summary_df["OverallExp_sort"] = summary_df["OverallExp"].fillna(-1.0)
     summary_df = summary_df.sort_values(
-        by=["Players", "OverallExp"],
-        ascending=[False, False],
+        by=["Players", "OverallExp_sort", "Team"],
+        ascending=[False, False, True],
         ignore_index=True,
-    )
+    ).drop(columns=["OverallExp_sort"])
 
-    # --------- Draw the page ---------
+    # ---------- draw the page ----------
     fig, ax = plt.subplots(figsize=(8.5, 11))  # portrait
     ax.axis("off")
 
-    # Title: "Cycle X Summary"
     fig.suptitle(f"{cycle_label} Summary", fontsize=14, fontweight="bold")
 
     y = 0.9
@@ -834,8 +836,7 @@ def _add_cycle_summary_page(
 
         y -= line_height
         if y < 0.05:
-            # Safety: stop if we run off the page
-            break
+            break  # don't run off the page
 
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     pdf.savefig(fig)
