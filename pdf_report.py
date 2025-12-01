@@ -9,6 +9,20 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
+# Mapping from chart number -> pretty label used in PDF tables
+CHART_LABELS = {
+    1: "(1)Safety and Support",
+    2: "(2)Improvement",
+    3: "(3)Instructions and Feedback",
+    4: "(4)Coaches Listening",
+    5: "(5)Effort and Discipline",
+    6: "(6)SC Value Alignment",
+    7: "(7)Overall Experience",
+    8: "(8)Team Belonging",
+    9: "(9)Cycle Enjoyment",
+}
+
+
 from excel_processor import (
     PLAYER_NAME_INDEX,
     RATING_COL_INDICES,
@@ -349,6 +363,7 @@ def _add_group_tables_page_to_pdf(
     }
 
     # 1-3 star reviews table (rename columns to chart numbers)
+        # ----- 1–3 star reviews table (rename columns to pretty labels) -----
     low_df = None
     if rating_indices:
         low_df = build_low_ratings_table(df_group, rating_indices, PLAYER_NAME_INDEX)
@@ -357,10 +372,11 @@ def _add_group_tables_page_to_pdf(
             for col in low_df.columns:
                 num = rating_number_by_name.get(col)
                 if num is not None:
-                    rename_cols[col] = str(num)
+                    # Use pretty label if we have it, otherwise fall back to the number
+                    rename_cols[col] = CHART_LABELS.get(num, str(num))
             low_df = low_df.rename(columns=rename_cols)
 
-    # "NO" replies table (rename columns to chart numbers)
+    # ----- "NO" replies table (rename columns to pretty labels) -----
     no_df = None
     if yesno_indices:
         no_df = build_no_answers_table(df_group, yesno_indices, PLAYER_NAME_INDEX)
@@ -369,8 +385,9 @@ def _add_group_tables_page_to_pdf(
             for col in no_df.columns:
                 num = yesno_number_by_name.get(col)
                 if num is not None:
-                    rename_cols2[col] = str(num)
+                    rename_cols2[col] = CHART_LABELS.get(num, str(num))
             no_df = no_df.rename(columns=rename_cols2)
+
 
     # Players / completion / comments
     players_df: Optional[pd.DataFrame] = None
