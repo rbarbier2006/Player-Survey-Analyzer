@@ -362,31 +362,53 @@ def _add_group_tables_page_to_pdf(
         m["col_name"]: m["number"] for m in plots_meta if m["ptype"] == "yesno"
     }
 
-    # 1-3 star reviews table (rename columns to chart numbers)
-        # ----- 1–3 star reviews table (rename columns to pretty labels) -----
-    low_df = None
+    # 1-3 star reviews table (rename columns to chart numbers)    
+    # ----- 1–3 star reviews table + labels -----
+    low_df: Optional[pd.DataFrame] = None
+    low_labels: Optional[List[str]] = None
+
     if rating_indices:
         low_df = build_low_ratings_table(df_group, rating_indices, PLAYER_NAME_INDEX)
         if low_df is not None:
-            rename_cols: Dict[str, str] = {}
+            low_labels = []
             for col in low_df.columns:
+                # Try to map from original question name -> chart number
                 num = rating_number_by_name.get(col)
-                if num is not None:
-                    # Use pretty label if we have it, otherwise fall back to the number
-                    rename_cols[col] = CHART_LABELS.get(num, str(num))
-            low_df = low_df.rename(columns=rename_cols)
 
-    # ----- "NO" replies table (rename columns to pretty labels) -----
-    no_df = None
+                # If that fails, try to interpret the column as an integer ("1", "2", ...)
+                if num is None:
+                    try:
+                        num = int(str(col))
+                    except ValueError:
+                        num = None
+
+                # Build final pretty label
+                if num is not None and num in CHART_LABELS:
+                    low_labels.append(CHART_LABELS[num])
+                else:
+                    low_labels.append(str(col))
+
+    # ----- "NO" replies table + labels -----
+    no_df: Optional[pd.DataFrame] = None
+    no_labels: Optional[List[str]] = None
+
     if yesno_indices:
         no_df = build_no_answers_table(df_group, yesno_indices, PLAYER_NAME_INDEX)
         if no_df is not None:
-            rename_cols2: Dict[str, str] = {}
+            no_labels = []
             for col in no_df.columns:
                 num = yesno_number_by_name.get(col)
-                if num is not None:
-                    rename_cols2[col] = CHART_LABELS.get(num, str(num))
-            no_df = no_df.rename(columns=rename_cols2)
+
+                if num is None:
+                    try:
+                        num = int(str(col))
+                    except ValueError:
+                        num = None
+
+                if num is not None and num in CHART_LABELS:
+                    no_labels.append(CHART_LABELS[num])
+                else:
+                    no_labels.append(str(col))
 
 
     # Players / completion / comments
@@ -467,9 +489,10 @@ def _add_group_tables_page_to_pdf(
 
         table = ax.table(
             cellText=low_df.values,
-            colLabels=low_df.columns,
+            colLabels=low_labels if low_labels is not None else low_df.columns,
             loc="upper left",
         )
+
         table.auto_set_font_size(False)
         table.set_fontsize(7)
 
@@ -490,15 +513,16 @@ def _add_group_tables_page_to_pdf(
         row_idx += 1
 
     # "NO" Replies (placed clearly below the 1-3 table)
-    if no_df is not None:
+        if no_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
 
         table = ax.table(
             cellText=no_df.values,
-            colLabels=no_df.columns,
+            colLabels=no_labels if no_labels is not None else no_df.columns,
             loc="upper left",
         )
+
         table.auto_set_font_size(False)
         table.set_fontsize(7)
 
