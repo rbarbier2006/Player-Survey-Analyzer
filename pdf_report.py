@@ -65,6 +65,28 @@ CHART_LABELS = {
     9: "(9)Cycle Enjoyment",
 }
 
+def _compose_group_title(title_label: str, cycle_label: str) -> str:
+    """
+    Build 'Team - Coach - Cycle X' for team pages and 'All Teams - Cycle X'
+    for the combined page.
+
+    If title_label already contains a coach (e.g. 'Team - Miguel'),
+    we just append ' - Cycle X' to avoid duplicating.
+    """
+    base = str(title_label).strip()
+
+    # All Teams page: no coach
+    if base == "All Teams":
+        return f"All Teams - {cycle_label}"
+
+    # If caller already supplied 'Team - Coach', don't add again
+    if " - " in base:
+        return f"{base} - {cycle_label}"
+
+    # Otherwise look up coach from the map, fallback to '?'
+    coach = TEAM_COACH_MAP.get(base, "?")
+    return f"{base} - {coach} - {cycle_label}"
+
 
 from excel_processor import (
     PLAYER_NAME_INDEX,
@@ -266,7 +288,7 @@ def _add_group_charts_page_to_pdf(
                 )
                 ax.set_title(wrapped_name, fontsize=8)
 
-    fig.suptitle(f"{title_label} - {cycle_label}", fontsize=12)
+    fig.suptitle(_compose_group_title(title_label, cycle_label), fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     pdf.savefig(fig)
     plt.close(fig)
@@ -686,7 +708,10 @@ def _add_group_tables_page_to_pdf(
         ax.set_title("Comments and Suggestions", fontsize=10, pad=6)
 
     # ----- Final layout -----
-    fig.suptitle(f"{title_label} - {cycle_label} (Details)", fontsize=12)
+    fig.suptitle(
+        _compose_group_title(title_label, cycle_label) + " (Details)",
+        fontsize=12,
+    )
     fig.tight_layout(rect=[0, 0.03, 1, 0.9])
     fig.subplots_adjust(hspace=0.55)
 
