@@ -10,6 +10,48 @@ import matplotlib.pyplot as plt
 import re
 from matplotlib.backends.backend_pdf import PdfPages
 
+# Mapping from team name -> coach name in the PDF titles :contentReference[oaicite:0]{index=0}
+TEAM_COACH_MAP = {
+    "MLS HG (T1) U19": "Jorge",
+    "MLS HG (T1) U17": "Chris",
+    "MLS HG (T1) U16": "David K",
+    "MLS HG (T1) U15": "Jorge",
+    "MLS HG (T1) U14": "David K",
+    "MLS HG (T1) U13": "Chris M",
+
+    "MLS AD (T2) U19": "Michael",
+    "MLS AD (T2) U17": "Michael",
+    "MLS AD (T2) U16": "Miguel",
+    "MLS AD (T2) U15": "Miguel",
+    "MLS AD (T2) U14": "?",          # unknown coach
+    "MLS AD (T2) U13": "Miguel",
+
+    "TX2 U19": "Jesus",
+    "TX2 U17": "Fernando",
+    "TX2 U16": "Jesus",
+    "TX2 U15": "Claudia",
+    "TX2 U14": "Rene/Claudia",
+    "TX2 U13": "Claudia/Rene",
+    "TX2 U12": "Armando",
+    "TX2 U11": "Armando",
+
+    "Athenians U16": "Rumen",
+    "Athenians U13": "Keeley",
+    "Athenians WDDOA U12": "Keeley",
+    "Athenians WDDOA U11": "Robert",
+    "Athenians PDF U10": "Robert",
+    "Athenians PDF U9": "Robert",
+
+    "WDDOA U12": "Adam",
+    "WDDOA U11": "Adam",
+
+    "PDF White U10": "Steven",
+    "PDF White U9": "Steven",
+    "PDF Red U10": "Pablo",
+    "PDF Red U9": "Pablo",
+}
+
+
 # Mapping from chart number -> pretty label used in PDF tables
 CHART_LABELS = {
     1: "(1)Safety and Support",
@@ -679,9 +721,9 @@ def create_pdf_from_original(
 
     group_col_name = df.columns[GROUP_COL_INDEX]
     df[group_col_name] = df[group_col_name].fillna("UNASSIGNED")
-
+    
     with PdfPages(output_path) as pdf:
-        # All teams combined
+        # All teams combined (keep as-is: no coach name)
         all_meta = _build_plot_metadata(df)
         _add_group_charts_page_to_pdf(pdf, df, "All Teams", cycle_label, all_meta)
         _add_group_tables_page_to_pdf(
@@ -690,11 +732,21 @@ def create_pdf_from_original(
 
         # Each team
         for group_value, group_df in df.groupby(group_col_name, sort=True):
-            title = str(group_value)
+            team_name = str(group_value).strip()
+
+            # Look up coach; default to "?" if not found
+            coach_name = TEAM_COACH_MAP.get(team_name, "?")
+
+            # This becomes "Team - Coach" and then the suptitle
+            # function will add "- Cycle X" on top of it.
+            title_label = f"{team_name} - {coach_name}"
+
             meta = _build_plot_metadata(group_df)
-            _add_group_charts_page_to_pdf(pdf, group_df, title, cycle_label, meta)
+            _add_group_charts_page_to_pdf(
+                pdf, group_df, title_label, cycle_label, meta
+            )
             _add_group_tables_page_to_pdf(
-                pdf, group_df, title, cycle_label, meta, is_all_teams=False
+                pdf, group_df, title_label, cycle_label, meta, is_all_teams=False
             )
 
     return output_path
