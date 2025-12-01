@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import re
 from matplotlib.backends.backend_pdf import PdfPages
 
 # Mapping from chart number -> pretty label used in PDF tables
@@ -329,6 +330,42 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
 
     return comments_df
 
+def _filter_low_df_by_max_star(low_df: pd.DataFrame, max_star: int = 2) -> pd.DataFrame:
+    """
+    Given the low-ratings table whose cells look like 'Name, (3★)',
+    keep only rows with rating <= max_star (per column).
+    Columns are preserved; we just shorten / pad the lists.
+    """
+    pattern = re.compile(r"\((\d)★\)")
+    new_cols: Dict[str, List[str]] = {}
+    max_len = 0
+
+    for col in low_df.columns:
+        filtered: List[str] = []
+        for val in low_df[col]:
+            s = str(val).strip()
+            if not s:
+                continue
+            m = pattern.search(s)
+            if m:
+                rating = int(m.group(1))
+                if rating <= max_star:
+                    filtered.append(s)
+        new_cols[col] = filtered
+        max_len = max(max_len, len(filtered))
+
+    # If nothing left at all, just return one blank row so the header still shows
+    if max_len == 0:
+        for col in new_cols:
+            new_cols[col] = [""]
+        return pd.DataFrame(new_cols)
+
+    # Pad each column to the same length
+    for col, vals in new_cols.items():
+        new_cols[col] = vals + [""] * (max_len - len(vals))
+
+    return pd.DataFrame(new_cols)
+
 
 def _add_group_tables_page_to_pdf(
     pdf: PdfPages,
@@ -342,15 +379,15 @@ def _add_group_tables_page_to_pdf(
     Page 2 for a group.
 
     For ALL TEAMS:
-      - 1-3 star reviews (columns = chart numbers)
-      - "NO" replies (columns = chart numbers)
-      - Completion summary: how many players completed the survey
+      - 1–2 star reviews (columns = chart numbers, but headers use CHART_LABELS)
+      - "NO" replies
+      - Completion summary
 
     For INDIVIDUAL TEAMS:
-      - 1-3 star reviews (columns = chart numbers)
-      - "NO" replies (columns = chart numbers)
-      - Players who completed this survey (names in up to 6 columns)
-      - Comments / suggestions (if any)
+      - 1–3 star reviews
+      - "NO" replies
+      - Players who completed this survey
+      - Comments / suggestions
     """
     rating_indices = [m["idx"] for m in plots_meta if m["ptype"] == "rating"]
     yesno_indices = [m["idx"] for m in plots_meta if m["ptype"] == "yesno"]
@@ -362,27 +399,27 @@ def _add_group_tables_page_to_pdf(
         m["col_name"]: m["number"] for m in plots_meta if m["ptype"] == "yesno"
     }
 
-    # 1-3 star reviews table (rename columns to chart numbers)    
-    # ----- 1–3 star reviews table + labels -----
+    # ----- 1–3 (or 1–2) star reviews table + labels -----
     low_df: Optional[pd.DataFrame] = None
     low_labels: Optional[List[str]] = None
 
     if rating_indices:
         low_df = build_low_ratings_table(df_group, rating_indices, PLAYER_NAME_INDEX)
+
         if low_df is not None:
+            # For ALL TEAMS only, keep 1–2★ results (teams keep 1–3★)
+            if is_all_teams:
+                low_df = _filter_low_df_by_max_star(low_df, max_star=2)
+
             low_labels = []
             for col in low_df.columns:
-                # Try to map from original question name -> chart number
                 num = rating_number_by_name.get(col)
-
-                # If that fails, try to interpret the column as an integer ("1", "2", ...)
                 if num is None:
                     try:
                         num = int(str(col))
                     except ValueError:
                         num = None
 
-                # Build final pretty label
                 if num is not None and num in CHART_LABELS:
                     low_labels.append(CHART_LABELS[num])
                 else:
@@ -398,7 +435,6 @@ def _add_group_tables_page_to_pdf(
             no_labels = []
             for col in no_df.columns:
                 num = yesno_number_by_name.get(col)
-
                 if num is None:
                     try:
                         num = int(str(col))
@@ -410,8 +446,7 @@ def _add_group_tables_page_to_pdf(
                 else:
                     no_labels.append(str(col))
 
-
-    # Players / completion / comments
+    # ----- Players / completion / comments -----
     players_df: Optional[pd.DataFrame] = None
     completion_df: Optional[pd.DataFrame] = None
     comments_df: Optional[pd.DataFrame] = None
@@ -433,6 +468,7 @@ def _add_group_tables_page_to_pdf(
         players_df = _build_all_players_grid(df_group, max_cols=6)
         comments_df = _build_comments_table(df_group)
 
+    # If literally nothing to show, skip page
     if (
         low_df is None
         and no_df is None
@@ -442,6 +478,7 @@ def _add_group_tables_page_to_pdf(
     ):
         return
 
+    # ----- Decide sections and relative heights -----
     sections: List[str] = []
     if low_df is not None:
         sections.append("low")
@@ -482,7 +519,7 @@ def _add_group_tables_page_to_pdf(
 
     row_idx = 0
 
-    # 1-3 Star Reviews
+    # --------- 1–X Star Reviews ----------
     if low_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -492,7 +529,6 @@ def _add_group_tables_page_to_pdf(
             colLabels=low_labels if low_labels is not None else low_df.columns,
             loc="upper left",
         )
-
         table.auto_set_font_size(False)
         table.set_fontsize(7)
 
@@ -505,14 +541,16 @@ def _add_group_tables_page_to_pdf(
             width_scale = 0.7
         table.scale(width_scale, 1.15)
 
-        ax.set_title(
-            "1-3 Star Reviews (columns = chart numbers)",
-            fontsize=10,
-            pad=6,
-        )
+        # Title text still says "1–3 Star Reviews" to match the charts;
+        # you can change to "1–2" for All Teams if you want:
+        title_text = "1-3 Star Reviews (columns = chart numbers)"
+        if is_all_teams:
+            title_text = "1-2 Star Reviews (columns = chart numbers)"
+
+        ax.set_title(title_text, fontsize=10, pad=6)
         row_idx += 1
 
-    # "NO" Replies (placed clearly below the 1-3 table)
+    # --------- "NO" Replies ----------
     if no_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -522,7 +560,6 @@ def _add_group_tables_page_to_pdf(
             colLabels=no_labels if no_labels is not None else no_df.columns,
             loc="upper left",
         )
-
         table.auto_set_font_size(False)
         table.set_fontsize(7)
 
@@ -542,7 +579,7 @@ def _add_group_tables_page_to_pdf(
         )
         row_idx += 1
 
-    # Completion summary (All Teams only)
+    # --------- Completion summary (All Teams only) ----------
     if is_all_teams and completion_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -556,14 +593,10 @@ def _add_group_tables_page_to_pdf(
         table.set_fontsize(11)
         table.scale(1.2, 1.5)
 
-        ax.set_title(
-            "Survey completion summary",
-            fontsize=10,
-            pad=4,
-        )
+        ax.set_title("Survey completion summary", fontsize=10, pad=4)
         row_idx += 1
 
-    # Players (team pages)
+    # --------- Players (team pages) ----------
     if not is_all_teams and players_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -577,14 +610,10 @@ def _add_group_tables_page_to_pdf(
         table.set_fontsize(8)
         table.scale(1.0, 1.5)
 
-        ax.set_title(
-            "Players who completed this survey",
-            fontsize=10,
-            pad=4,
-        )
+        ax.set_title("Players who completed this survey", fontsize=10, pad=4)
         row_idx += 1
 
-    # Comments / Suggestions (team pages)
+    # --------- Comments / Suggestions (team pages) ----------
     if not is_all_teams and comments_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -595,7 +624,6 @@ def _add_group_tables_page_to_pdf(
             loc="upper left",
             colWidths=[0.15, 0.85],  # 15% name, 85% comment
         )
-
         table.auto_set_font_size(False)
         table.set_fontsize(8)
         table.scale(1.0, 2.0)
@@ -604,7 +632,6 @@ def _add_group_tables_page_to_pdf(
             if r == 0:
                 cell.set_text_props(ha="center", va="center")
                 continue
-
             if c == 0:
                 cell.set_text_props(ha="center", va="center")
             elif c == 1:
@@ -614,18 +641,16 @@ def _add_group_tables_page_to_pdf(
                 txt.set_wrap(True)
                 cell.PAD = 0.02
 
-        ax.set_title(
-            "Comments and Suggestions",
-            fontsize=10,
-            pad=6,
-        )
+        ax.set_title("Comments and Suggestions", fontsize=10, pad=6)
 
+    # ----- Final layout -----
     fig.suptitle(f"{title_label} - {cycle_label} (Details)", fontsize=12)
     fig.tight_layout(rect=[0, 0.03, 1, 0.9])
     fig.subplots_adjust(hspace=0.55)
 
     pdf.savefig(fig)
     plt.close(fig)
+
 
 
 def create_pdf_from_original(
