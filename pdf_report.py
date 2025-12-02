@@ -739,7 +739,7 @@ def _add_cycle_summary_page(
             # Skip fake / missing teams in the summary
             continue
 
-        # ---------- number of players ----------
+        # ----- number of players -----
         if PLAYER_NAME_INDEX < len(group_df.columns):
             names = (
                 group_df.iloc[:, PLAYER_NAME_INDEX]
@@ -752,7 +752,7 @@ def _add_cycle_summary_page(
         else:
             n_players = 0
 
-        # ---------- find Overall Experience (chart #7) ----------
+        # ----- find Overall Experience = rating chart #7 -----
         meta = _build_plot_metadata(group_df)
         overall_idx: Optional[int] = None
         for m in meta:
@@ -768,7 +768,7 @@ def _add_cycle_summary_page(
         else:
             avg_q7 = np.nan
 
-        # ---------- coach lookup ----------
+        # ----- coach lookup -----
         coach_name = TEAM_COACH_MAP.get(team_name, "?")
 
         summary_rows.append(
@@ -793,30 +793,28 @@ def _add_cycle_summary_page(
         ignore_index=True,
     ).drop(columns=["OverallExp_sort"])
 
-    # Convenience column for labels like "MLS HG (T1) U13 - Chris M"
+    # Text label for both table and x-axis
     summary_df["TeamCoach"] = summary_df["Team"] + " - " + summary_df["Coach"]
 
     # ---------- prepare table data ----------
     table_rows: List[List[str]] = []
     for _, row in summary_df.iterrows():
         players = int(row["Players"])
-        if pd.isna(row["OverallExp"]):
-            rating_str = "N/A"
-        else:
-            rating_str = f"{row['OverallExp']:.2f}"
+        rating_val = row["OverallExp"]
+        rating_str = "N/A" if pd.isna(rating_val) else f"{rating_val:.2f}"
         table_rows.append([row["TeamCoach"], players, rating_str])
 
     # ---------- prepare bar chart data ----------
     x = np.arange(len(summary_df))
-    players_vals = summary_df["Players"].astype(float).tolist()
-    rating_vals = summary_df["OverallExp"].fillna(0.0).tolist()
+    players_vals = summary_df["Players"].astype(float).to_numpy()
+    rating_vals = summary_df["OverallExp"].fillna(0.0).astype(float).to_numpy()
 
     # ---------- draw figure: table (left) + chart (right) ----------
     fig, (ax_table, ax_bar) = plt.subplots(
         1,
         2,
-        figsize=(11, 8.5),              # landscape
-        gridspec_kw={"width_ratios": [1.2, 2.0]},
+        figsize=(11, 8.5),  # landscape
+        gridspec_kw={"width_ratios": [1.3, 2.0]},
     )
 
     fig.suptitle(f"{cycle_label} Summary", fontsize=14, fontweight="bold")
@@ -845,13 +843,22 @@ def _add_cycle_summary_page(
         ha="right",
         fontsize=6,
     )
-    ax_bar.set_ylim(0, max(max(players_vals), max(rating_vals)) * 1.2)
-    ax_bar.legend(fontsize=7)
+
+    # set y-axis reasonably
+    ymax = 0.0
+    if len(players_vals) > 0:
+        ymax = max(ymax, float(players_vals.max()))
+    if len(rating_vals) > 0:
+        ymax = max(ymax, float(rating_vals.max()))
+    ax_bar.set_ylim(0, max(ymax * 1.2, 1.0))
+
     ax_bar.set_ylabel("Value", fontsize=8)
+    ax_bar.legend(fontsize=7)
 
     fig.tight_layout(rect=[0, 0, 1, 0.93])
     pdf.savefig(fig)
     plt.close(fig)
+
 
 
 
