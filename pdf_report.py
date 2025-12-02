@@ -725,14 +725,11 @@ def _add_cycle_summary_page(
     cycle_label: str,
 ) -> None:
     """
-    First page of the PDF.
+    First page of the PDF: ranked table + bar chart.
 
-    Ranks teams by:
-      1) how many players completed the survey (descending)
-      2) Overall Experience (question 7) average (descending) as tiebreaker
-
-    Lines look like:
-      1. Team - Coach: 3 players; Overall Experience: 4.33
+    - Table columns: Team - Coach | Players | Rating (Overall Experience, Q7)
+    - Sorted by Players (desc), then Rating (desc).
+    - Bar chart: Players vs Rating for each team.
     """
     summary_rows: List[Dict[str, Any]] = []
 
@@ -789,7 +786,6 @@ def _add_cycle_summary_page(
     summary_df = pd.DataFrame(summary_rows)
 
     # Rank: more players first, then higher Overall Experience
-    # Use a filled column so NaNs sort last.
     summary_df["OverallExp_sort"] = summary_df["OverallExp"].fillna(-1.0)
     summary_df = summary_df.sort_values(
         by=["Players", "OverallExp_sort", "Team"],
@@ -797,50 +793,66 @@ def _add_cycle_summary_page(
         ignore_index=True,
     ).drop(columns=["OverallExp_sort"])
 
-    # ---------- draw the page ----------
-    fig, ax = plt.subplots(figsize=(8.5, 11))  # portrait
-    ax.axis("off")
+    # Convenience column for labels like "MLS HG (T1) U13 - Chris M"
+    summary_df["TeamCoach"] = summary_df["Team"] + " - " + summary_df["Coach"]
+
+    # ---------- prepare table data ----------
+    table_rows: List[List[str]] = []
+    for _, row in summary_df.iterrows():
+        players = int(row["Players"])
+        if pd.isna(row["OverallExp"]):
+            rating_str = "N/A"
+        else:
+            rating_str = f"{row['OverallExp']:.2f}"
+        table_rows.append([row["TeamCoach"], players, rating_str])
+
+    # ---------- prepare bar chart data ----------
+    x = np.arange(len(summary_df))
+    players_vals = summary_df["Players"].astype(float).tolist()
+    rating_vals = summary_df["OverallExp"].fillna(0.0).tolist()
+
+    # ---------- draw figure: table (left) + chart (right) ----------
+    fig, (ax_table, ax_bar) = plt.subplots(
+        1,
+        2,
+        figsize=(11, 8.5),              # landscape
+        gridspec_kw={"width_ratios": [1.2, 2.0]},
+    )
 
     fig.suptitle(f"{cycle_label} Summary", fontsize=14, fontweight="bold")
 
-    y = 0.9
-    line_height = 0.035
+    # ---- table ----
+    ax_table.axis("off")
+    table = ax_table.table(
+        cellText=table_rows,
+        colLabels=["Team - Coach", "Players", "Rating"],
+        loc="upper left",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(7)
+    table.scale(1.1, 1.2)
 
-    for i, row in summary_df.iterrows():
-        rank = i + 1
-        team = row["Team"]
-        coach = row["Coach"]
-        players = int(row["Players"])
+    # ---- bar chart ----
+    ax_bar.set_title(f"{cycle_label} Players/Ratings", fontsize=10)
+    width = 0.4
+    ax_bar.bar(x - width / 2, players_vals, width, label="Players")
+    ax_bar.bar(x + width / 2, rating_vals, width, label="Rating")
 
-        if pd.isna(row["OverallExp"]):
-            oe_str = "N/A"
-        else:
-            oe_str = f"{row['OverallExp']:.2f}"
+    ax_bar.set_xticks(x)
+    ax_bar.set_xticklabels(
+        summary_df["TeamCoach"],
+        rotation=60,
+        ha="right",
+        fontsize=6,
+    )
+    ax_bar.set_ylim(0, max(max(players_vals), max(rating_vals)) * 1.2)
+    ax_bar.legend(fontsize=7)
+    ax_bar.set_ylabel("Value", fontsize=8)
 
-        players_word = "player" if players == 1 else "players"
-
-        text = (
-            f"{rank}. {team} - {coach}: "
-            f"{players} {players_word}; Overall Experience: {oe_str}"
-        )
-
-        ax.text(
-            0.04,
-            y,
-            text,
-            fontsize=9,
-            ha="left",
-            va="top",
-            transform=ax.transAxes,
-        )
-
-        y -= line_height
-        if y < 0.05:
-            break  # don't run off the page
-
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
     pdf.savefig(fig)
     plt.close(fig)
+
 
 
 def create_pdf_from_original(
