@@ -908,7 +908,7 @@ def _add_cycle_summary_page(
             else:
                 cell.set_text_props(ha="center", va="center")
 
-    # ---------- Right: QQ index bar chart ----------
+        # ---------- Right: QQ index horizontal bar chart ----------
     # QQ index = rating * (players / roster_size)
     qq_vals: List[float] = []
     for team, players, rating in zip(
@@ -918,31 +918,23 @@ def _add_cycle_summary_page(
         if roster is None or roster <= 0 or pd.isna(rating):
             qq_vals.append(0.0)
         else:
-            frac = players / float(roster)  # completion fraction 0–1
+            frac = players / float(roster)  # completion fraction 0-1
             qq_vals.append(float(rating) * frac)
 
     summary_df["QQIndex"] = qq_vals
 
     ax_bar.set_title(f"{cycle_label} QQ (Quality Quantity) Index", fontsize=10)
 
-    x = np.arange(len(summary_df))
-    width = 0.6
-    ax_bar.bar(
-        x,
-        summary_df["QQIndex"].values.astype(float),
-        width=width,
-        label="QQ index",
-    )
+    y_pos = np.arange(len(summary_df))
+    ax_bar.barh(y_pos, summary_df["QQIndex"].values.astype(float),
+                height=0.6, label="QQ (Quality-Quantity Index")
 
-    ax_bar.set_ylabel("QQ index (rating × completion fraction)")
-    ax_bar.set_xticks(x)
-    ax_bar.set_xticklabels(summary_df["TeamCoach"], rotation=90, fontsize=6)
-    ax_bar.set_ylim(0, 5.1)  # rating max is 5, so QQ in [0,5]
+    ax_bar.set_xlabel("QQ index (rating x completion fraction)")
+    ax_bar.set_yticks(y_pos)
+    ax_bar.set_yticklabels(summary_df["TeamCoach"], fontsize=6)
+    ax_bar.invert_yaxis()  # so best teams (largest QQ) are at the top
+    ax_bar.set_xlim(0, 5.1)  # rating max is 5, so QQ is in [0, 5]
     ax_bar.legend(fontsize=8)
-
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
-    pdf.savefig(fig)
-    plt.close(fig)
 
 
 
