@@ -788,6 +788,9 @@ def _add_cycle_summary_page(
 
     Also includes teams that had 0 players complete the survey
     (they come from TEAM_COACH_MAP).
+
+    The right-hand chart shows the QQ index:
+        QQ = rating * (players / roster_size)
     """
     cols = list(df.columns)
 
@@ -855,22 +858,22 @@ def _add_cycle_summary_page(
         ignore_index=True,
     )
 
-    # Build helper columns for display and plotting
+    # Helper columns
     summary_df["TeamCoach"] = summary_df["Team"] + " - " + summary_df["Coach"]
     summary_df["Rating"] = summary_df["OverallExp"]
 
-    # Text version of rating for the table
+    # Text rating for table
     summary_df["RatingStr"] = summary_df["Rating"].apply(
         lambda v: "" if pd.isna(v) else f"{v:.2f}"
     )
 
-    # Text version of players: uses TEAM_ROSTER_SIZE via _format_players_cell
+    # Text players col: "X (Y%)" using TEAM_ROSTER_SIZE
     summary_df["PlayersDisplay"] = [
         _format_players_cell(team, int(players))
         for team, players in zip(summary_df["Team"], summary_df["Players"])
     ]
 
-    # ------------ Draw table + bar chart on the summary page ------------
+    # ------------ Draw table + QQ index chart on the summary page ------------
     fig, (ax_table, ax_bar) = plt.subplots(
         1,
         2,
@@ -880,7 +883,7 @@ def _add_cycle_summary_page(
 
     fig.suptitle(f"{cycle_label} Summary", fontsize=14, fontweight="bold")
 
-    # Left: table
+    # ---------- Left: table ----------
     ax_table.axis("off")
 
     display_df = summary_df[["TeamCoach", "PlayersDisplay", "RatingStr"]]
@@ -905,20 +908,31 @@ def _add_cycle_summary_page(
             else:
                 cell.set_text_props(ha="center", va="center")
 
-    # Right: bar chart (raw numeric counts and ratings)
-    ax_bar.set_title(f"{cycle_label} Players/Ratings", fontsize=10)
+    # ---------- Right: QQ index bar chart ----------
+    # QQ index = rating * (players / roster_size)
+    qq_vals: List[float] = []
+    for team, players, rating in zip(
+        summary_df["Team"], summary_df["Players"], summary_df["Rating"]
+    ):
+        roster = TEAM_ROSTER_SIZE.get(team)
+        if roster is None or roster <= 0 or pd.isna(rating):
+            qq_vals.append(0.0)
+        else:
+            frac = players / float(roster)  # completion fraction 0–1
+            qq_vals.append(float(rating) * frac)
+
+    summary_df["QQIndex"] = qq_vals
+
+    ax_bar.set_title(f"{cycle_label} QQ Index", fontsize=10)
 
     x = np.arange(len(summary_df))
-    players_vals = summary_df["Players"].values.astype(float)
-    rating_vals = summary_df["Rating"].fillna(0.0).values.astype(float)
+    width = 0.6
+    ax_bar.bar(x, summary_df["QQIndex"].values.astype(float), width=width, label="QQ index")
 
-    width = 0.35
-    ax_bar.bar(x - width / 2, players_vals, width=width, label="Players")
-    ax_bar.bar(x + width / 2, rating_vals, width=width, label="Rating")
-
-    ax_bar.set_ylabel("Value")
+    ax_bar.set_ylabel("QQ index (rating × completion fraction)")
     ax_bar.set_xticks(x)
     ax_bar.set_xticklabels(summary_df["TeamCoach"], rotation=90, fontsize=6)
+    ax_bar.set_ylim(0, 5.1)  # rating max is 5, so QQ in [0,5]
     ax_bar.legend(fontsize=8)
 
     fig.tight_layout(rect=[0, 0, 1, 0.95])
