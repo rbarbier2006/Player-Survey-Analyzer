@@ -806,6 +806,7 @@ def _add_cycle_summary_page(
         lambda x: "" if pd.isna(x) else f"{x:.2f}"
     )
 
+    
     # ---- 3) Draw table + bar chart ----
     fig, (ax_table, ax_bar) = plt.subplots(
         1,
@@ -818,14 +819,27 @@ def _add_cycle_summary_page(
 
     # Left: table
     ax_table.axis("off")
+
+    # Make TeamCoach wide, Players/Rating narrow
     table = ax_table.table(
         cellText=display_df[["TeamCoach", "Players", "Rating"]].values,
         colLabels=["Team - Coach", "Players", "Rating"],
         loc="center",
+        colWidths=[0.7, 0.15, 0.15],   # <-- key change
     )
     table.auto_set_font_size(False)
     table.set_fontsize(7)
     table.scale(1.1, 1.1)
+
+    # Optional: align text nicely
+    for (r, c), cell in table.get_celld().items():
+        if r == 0:  # header row
+            cell.set_text_props(ha="center", va="center", fontweight="bold")
+        else:
+            if c == 0:
+                cell.set_text_props(ha="left", va="center")
+            else:
+                cell.set_text_props(ha="center", va="center")
 
     # Right: bar chart
     ax_bar.set_title(f"{cycle_label} Players/Ratings", fontsize=10)
@@ -846,6 +860,7 @@ def _add_cycle_summary_page(
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     pdf.savefig(fig)
     plt.close(fig)
+
 
 
 
