@@ -204,6 +204,24 @@ def _add_group_charts_page_to_pdf(
     if not plots_meta:
         return
 
+    # How many players completed the survey in this group?
+    if PLAYER_NAME_INDEX < len(df_group.columns):
+        names = (
+            df_group.iloc[:, PLAYER_NAME_INDEX]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+        names = names[names != ""]
+        n_players = int(names.nunique())
+    else:
+        n_players = 0
+
+    if n_players == 1:
+        n_text = " (1 player)"
+    else:
+        n_text = f" ({n_players} players)"
+
     n_plots = len(plots_meta)
     ncols = 3
     nrows = int(np.ceil(n_plots / ncols))
@@ -328,7 +346,8 @@ def _add_group_charts_page_to_pdf(
                 )
                 ax.set_title(wrapped_name, fontsize=8)
 
-    fig.suptitle(_compose_group_title(title_label, cycle_label), fontsize=12)
+    full_title = _compose_group_title(title_label, cycle_label) + n_text
+    fig.suptitle(full_title, fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     pdf.savefig(fig)
     plt.close(fig)
@@ -483,16 +502,34 @@ def _add_group_tables_page_to_pdf(
     Page 2 for a group.
 
     For ALL TEAMS:
-      - 1–2 star reviews (columns = chart numbers, but headers use CHART_LABELS)
+      - 1-2 star reviews (columns = chart numbers, but headers use CHART_LABELS)
       - "NO" replies
       - Completion summary
 
     For INDIVIDUAL TEAMS:
-      - 1–3 star reviews
+      - 1-3 star reviews
       - "NO" replies
       - Players who completed this survey
       - Comments / suggestions
     """
+    # Count players for this group for the title
+    if PLAYER_NAME_INDEX < len(df_group.columns):
+        names = (
+            df_group.iloc[:, PLAYER_NAME_INDEX]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+        names = names[names != ""]
+        n_players = int(names.nunique())
+    else:
+        n_players = 0
+
+    if n_players == 1:
+        n_text = " (1 player)"
+    else:
+        n_text = f" ({n_players} players)"
+
     rating_indices = [m["idx"] for m in plots_meta if m["ptype"] == "rating"]
     yesno_indices = [m["idx"] for m in plots_meta if m["ptype"] == "yesno"]
 
@@ -503,7 +540,7 @@ def _add_group_tables_page_to_pdf(
         m["col_name"]: m["number"] for m in plots_meta if m["ptype"] == "yesno"
     }
 
-    # ----- 1–3 (or 1–2) star reviews table + labels -----
+    # ----- 1-3 (or 1-2) star reviews table + labels -----
     low_df: Optional[pd.DataFrame] = None
     low_labels: Optional[List[str]] = None
 
@@ -511,7 +548,7 @@ def _add_group_tables_page_to_pdf(
         low_df = build_low_ratings_table(df_group, rating_indices, PLAYER_NAME_INDEX)
 
         if low_df is not None:
-            # For ALL TEAMS only, keep 1–2★ results (teams keep 1–3★)
+            # For ALL TEAMS only, keep 1-2 star results (teams keep 1-3)
             if is_all_teams:
                 low_df = _filter_low_df_by_max_star(low_df, max_star=2)
 
@@ -550,7 +587,7 @@ def _add_group_tables_page_to_pdf(
                 else:
                     no_labels.append(str(col))
 
-    # ----- Players / completion / comments -----
+    # Players / completion / comments
     players_df: Optional[pd.DataFrame] = None
     completion_df: Optional[pd.DataFrame] = None
     comments_df: Optional[pd.DataFrame] = None
@@ -572,7 +609,6 @@ def _add_group_tables_page_to_pdf(
         players_df = _build_all_players_grid(df_group, max_cols=6)
         comments_df = _build_comments_table(df_group)
 
-    # If literally nothing to show, skip page
     if (
         low_df is None
         and no_df is None
@@ -582,7 +618,6 @@ def _add_group_tables_page_to_pdf(
     ):
         return
 
-    # ----- Decide sections and relative heights -----
     sections: List[str] = []
     if low_df is not None:
         sections.append("low")
@@ -615,7 +650,7 @@ def _add_group_tables_page_to_pdf(
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=1,
-        figsize=(11, 8.5),  # landscape
+        figsize=(11, 8.5),
         gridspec_kw={"height_ratios": height_ratios},
     )
     if nrows == 1:
@@ -623,7 +658,7 @@ def _add_group_tables_page_to_pdf(
 
     row_idx = 0
 
-    # --------- 1–X Star Reviews ----------
+    # 1-X Star Reviews
     if low_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -645,8 +680,6 @@ def _add_group_tables_page_to_pdf(
             width_scale = 0.7
         table.scale(width_scale, 1.15)
 
-        # Title text still says "1–3 Star Reviews" to match the charts;
-        # you can change to "1–2" for All Teams if you want:
         title_text = "1-3 Star Reviews (columns = chart numbers)"
         if is_all_teams:
             title_text = "1-2 Star Reviews (columns = chart numbers)"
@@ -654,7 +687,7 @@ def _add_group_tables_page_to_pdf(
         ax.set_title(title_text, fontsize=10, pad=6)
         row_idx += 1
 
-    # --------- "NO" Replies ----------
+    # "NO" Replies
     if no_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -676,14 +709,10 @@ def _add_group_tables_page_to_pdf(
             width_scale = 0.75
         table.scale(width_scale, 1.15)
 
-        ax.set_title(
-            '"NO" Replies (columns = chart numbers)',
-            fontsize=10,
-            pad=6,
-        )
+        ax.set_title('"NO" Replies (columns = chart numbers)', fontsize=10, pad=6)
         row_idx += 1
 
-    # --------- Completion summary (All Teams only) ----------
+    # Completion summary (All Teams only)
     if is_all_teams and completion_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -700,7 +729,7 @@ def _add_group_tables_page_to_pdf(
         ax.set_title("Survey completion summary", fontsize=10, pad=4)
         row_idx += 1
 
-    # --------- Players (team pages) ----------
+    # Players (team pages)
     if not is_all_teams and players_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -717,7 +746,7 @@ def _add_group_tables_page_to_pdf(
         ax.set_title("Players who completed this survey", fontsize=10, pad=4)
         row_idx += 1
 
-    # --------- Comments / Suggestions (team pages) ----------
+    # Comments / Suggestions (team pages)
     if not is_all_teams and comments_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
@@ -726,7 +755,7 @@ def _add_group_tables_page_to_pdf(
             cellText=comments_df.values,
             colLabels=comments_df.columns,
             loc="upper left",
-            colWidths=[0.15, 0.85],  # 15% name, 85% comment
+            colWidths=[0.15, 0.85],
         )
         table.auto_set_font_size(False)
         table.set_fontsize(8)
@@ -747,11 +776,8 @@ def _add_group_tables_page_to_pdf(
 
         ax.set_title("Comments and Suggestions", fontsize=10, pad=6)
 
-    # ----- Final layout -----
-    fig.suptitle(
-        _compose_group_title(title_label, cycle_label) + " (Details)",
-        fontsize=12,
-    )
+    full_title = _compose_group_title(title_label, cycle_label) + n_text + " (Details)"
+    fig.suptitle(full_title, fontsize=12)
     fig.tight_layout(rect=[0, 0.03, 1, 0.9])
     fig.subplots_adjust(hspace=0.55)
 
