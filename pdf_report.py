@@ -758,6 +758,21 @@ def _add_group_tables_page_to_pdf(
     pdf.savefig(fig)
     plt.close(fig)
 
+def _format_players_cell(team_name: str, players: int) -> str:
+    """
+    Format the 'Players' cell as:
+        <players> (<percentage>%)
+    using TEAM_ROSTER_SIZE[team_name] as the denominator, if available.
+    If no roster size is known, just return the raw number.
+    """
+    total = TEAM_ROSTER_SIZE.get(team_name)
+    if not total or total <= 0:
+        return str(players)
+
+    pct = (players / total) * 100.0
+    return f"{players} ({pct:.0f}%)"
+
+
 def _add_cycle_summary_page(
     pdf: PdfPages,
     df: pd.DataFrame,
@@ -831,23 +846,31 @@ def _add_cycle_summary_page(
             }
         )
 
-    summary_df = pd.DataFrame(rows)
+        summary_df = pd.DataFrame(summary_rows)
 
     # Rank: more players first, then higher Overall Experience
     summary_df = summary_df.sort_values(
-        by=["Players", "Rating"],
+        by=["Players", "OverallExp"],
         ascending=[False, False],
         ignore_index=True,
     )
 
-    # For the table we show "" when Rating is NaN, otherwise 2-decimals
-    display_df = summary_df.copy()
-    display_df["Rating"] = display_df["Rating"].apply(
-        lambda x: "" if pd.isna(x) else f"{x:.2f}"
+    # Build helper columns for display and plotting
+    summary_df["TeamCoach"] = summary_df["Team"] + " - " + summary_df["Coach"]
+    summary_df["Rating"] = summary_df["OverallExp"]
+
+    # Text version of rating for the table
+    summary_df["RatingStr"] = summary_df["Rating"].apply(
+        lambda v: "" if pd.isna(v) else f"{v:.2f}"
     )
 
-    
-    # ---- 3) Draw table + bar chart ----
+    # Text version of players: "<count> (<pct>%)" if roster is known
+    summary_df["PlayersDisplay"] = [
+        _format_players_cell(team, players)
+        for team, players in zip(summary_df["Team"], summary_df["Players"])
+    ]
+
+    # ------------ Draw table + bar chart on the summary page ------------
     fig, (ax_table, ax_bar) = plt.subplots(
         1,
         2,
@@ -860,20 +883,21 @@ def _add_cycle_summary_page(
     # Left: table
     ax_table.axis("off")
 
-    # Make TeamCoach wide, Players/Rating narrow
+    display_df = summary_df[["TeamCoach", "PlayersDisplay", "RatingStr"]]
+
     table = ax_table.table(
-        cellText=display_df[["TeamCoach", "Players", "Rating"]].values,
+        cellText=display_df.values,
         colLabels=["Team - Coach", "Players", "Rating"],
         loc="center",
-        colWidths=[0.7, 0.15, 0.15],   # <-- key change
+        colWidths=[0.7, 0.15, 0.15],  # wide first col, thin numeric cols
     )
     table.auto_set_font_size(False)
     table.set_fontsize(7)
     table.scale(1.1, 1.1)
 
-    # Optional: align text nicely
+    # Optional nicer alignment
     for (r, c), cell in table.get_celld().items():
-        if r == 0:  # header row
+        if r == 0:
             cell.set_text_props(ha="center", va="center", fontweight="bold")
         else:
             if c == 0:
@@ -881,12 +905,12 @@ def _add_cycle_summary_page(
             else:
                 cell.set_text_props(ha="center", va="center")
 
-    # Right: bar chart
+    # Right: bar chart (still uses raw numeric counts and ratings)
     ax_bar.set_title(f"{cycle_label} Players/Ratings", fontsize=10)
 
     x = np.arange(len(summary_df))
     players_vals = summary_df["Players"].values
-    rating_vals = summary_df["Rating"].fillna(0.0).values  # 0 for teams with no rating
+    rating_vals = summary_df["Rating"].fillna(0.0).values
 
     width = 0.35
     ax_bar.bar(x - width / 2, players_vals, width=width, label="Players")
@@ -900,6 +924,7 @@ def _add_cycle_summary_page(
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     pdf.savefig(fig)
     plt.close(fig)
+
 
 
 
