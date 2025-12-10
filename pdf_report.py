@@ -725,21 +725,30 @@ def _add_cycle_summary_page(
     cycle_label: str,
 ) -> None:
     """
-    First page of the PDF: ranked table + bar chart.
+    First page of the PDF.
 
-    - Table columns: Team - Coach | Players | Rating (Overall Experience, Q7)
-    - Sorted by Players (desc), then Rating (desc).
-    - Bar chart: Players vs Rating for each team.
+    Ranks teams by:
+      1) how many players completed the survey (descending)
+      2) Overall Experience (question 7) average (descending) as tiebreaker
+
+    Also includes teams that had 0 players complete the survey
+    (they come from TEAM_COACH_MAP).
     """
-    summary_rows: List[Dict[str, Any]] = []
+    cols = list(df.columns)
+
+    # Which column is "Overall Experience" (question 7)?
+    rating_indices = [idx for idx in RATING_COL_INDICES if idx < len(cols)]
+    overall_idx = rating_indices[6] if len(rating_indices) >= 7 else None  # 0-based
+
+    # ---- 1) Build stats only for teams that actually have data ----
+    stats_by_team: Dict[str, Any] = {}
 
     for group_value, group_df in df.groupby(group_col_name, sort=True):
         team_name = str(group_value).strip()
         if team_name == "UNASSIGNED":
-            # Skip fake / missing teams in the summary
             continue
 
-        # ----- number of players -----
+        # Number of players who completed the survey
         if PLAYER_NAME_INDEX < len(group_df.columns):
             names = (
                 group_df.iloc[:, PLAYER_NAME_INDEX]
@@ -752,14 +761,7 @@ def _add_cycle_summary_page(
         else:
             n_players = 0
 
-        # ----- find Overall Experience = rating chart #7 -----
-        meta = _build_plot_metadata(group_df)
-        overall_idx: Optional[int] = None
-        for m in meta:
-            if m["ptype"] == "rating" and m["number"] == 7:
-                overall_idx = m["idx"]
-                break
-
+        # Average "Overall Experience" (Q7)
         if overall_idx is not None and overall_idx < len(group_df.columns):
             series = pd.to_numeric(
                 group_df.iloc[:, overall_idx], errors="coerce"
@@ -768,94 +770,80 @@ def _add_cycle_summary_page(
         else:
             avg_q7 = np.nan
 
-        # ----- coach lookup -----
-        coach_name = TEAM_COACH_MAP.get(team_name, "?")
+        stats_by_team[team_name] = (n_players, avg_q7)
 
-        summary_rows.append(
+    # ---- 2) Build rows for ALL teams (data + no-response teams) ----
+    # union of teams in the data and in TEAM_COACH_MAP
+    all_team_names = sorted(set(stats_by_team.keys()) | set(TEAM_COACH_MAP.keys()))
+    if not all_team_names:
+        return
+
+    rows: List[Dict[str, Any]] = []
+    for team_name in all_team_names:
+        coach_name = TEAM_COACH_MAP.get(team_name, "?")
+        players, avg_q7 = stats_by_team.get(team_name, (0, np.nan))
+
+        rows.append(
             {
-                "Team": team_name,
-                "Coach": coach_name,
-                "Players": n_players,
-                "OverallExp": avg_q7,
+                "TeamCoach": f"{team_name} - {coach_name}",
+                "Players": players,
+                "Rating": avg_q7,
             }
         )
 
-    if not summary_rows:
-        return
-
-    summary_df = pd.DataFrame(summary_rows)
+    summary_df = pd.DataFrame(rows)
 
     # Rank: more players first, then higher Overall Experience
-    summary_df["OverallExp_sort"] = summary_df["OverallExp"].fillna(-1.0)
     summary_df = summary_df.sort_values(
-        by=["Players", "OverallExp_sort", "Team"],
-        ascending=[False, False, True],
+        by=["Players", "Rating"],
+        ascending=[False, False],
         ignore_index=True,
-    ).drop(columns=["OverallExp_sort"])
+    )
 
-    # Text label for both table and x-axis
-    summary_df["TeamCoach"] = summary_df["Team"] + " - " + summary_df["Coach"]
+    # For the table we show "" when Rating is NaN, otherwise 2-decimals
+    display_df = summary_df.copy()
+    display_df["Rating"] = display_df["Rating"].apply(
+        lambda x: "" if pd.isna(x) else f"{x:.2f}"
+    )
 
-    # ---------- prepare table data ----------
-    table_rows: List[List[str]] = []
-    for _, row in summary_df.iterrows():
-        players = int(row["Players"])
-        rating_val = row["OverallExp"]
-        rating_str = "N/A" if pd.isna(rating_val) else f"{rating_val:.2f}"
-        table_rows.append([row["TeamCoach"], players, rating_str])
-
-    # ---------- prepare bar chart data ----------
-    x = np.arange(len(summary_df))
-    players_vals = summary_df["Players"].astype(float).to_numpy()
-    rating_vals = summary_df["OverallExp"].fillna(0.0).astype(float).to_numpy()
-
-    # ---------- draw figure: table (left) + chart (right) ----------
+    # ---- 3) Draw table + bar chart ----
     fig, (ax_table, ax_bar) = plt.subplots(
         1,
         2,
-        figsize=(11, 8.5),  # landscape
-        gridspec_kw={"width_ratios": [1.3, 2.0]},
+        figsize=(11, 8.5),
+        gridspec_kw={"width_ratios": [1.2, 1.8]},
     )
 
     fig.suptitle(f"{cycle_label} Summary", fontsize=14, fontweight="bold")
 
-    # ---- table ----
+    # Left: table
     ax_table.axis("off")
     table = ax_table.table(
-        cellText=table_rows,
+        cellText=display_df[["TeamCoach", "Players", "Rating"]].values,
         colLabels=["Team - Coach", "Players", "Rating"],
-        loc="upper left",
+        loc="center",
     )
     table.auto_set_font_size(False)
     table.set_fontsize(7)
-    table.scale(1.1, 1.2)
+    table.scale(1.1, 1.1)
 
-    # ---- bar chart ----
+    # Right: bar chart
     ax_bar.set_title(f"{cycle_label} Players/Ratings", fontsize=10)
-    width = 0.4
-    ax_bar.bar(x - width / 2, players_vals, width, label="Players")
-    ax_bar.bar(x + width / 2, rating_vals, width, label="Rating")
 
+    x = np.arange(len(summary_df))
+    players_vals = summary_df["Players"].values
+    rating_vals = summary_df["Rating"].fillna(0.0).values  # 0 for teams with no rating
+
+    width = 0.35
+    ax_bar.bar(x - width / 2, players_vals, width=width, label="Players")
+    ax_bar.bar(x + width / 2, rating_vals, width=width, label="Rating")
+
+    ax_bar.set_ylabel("Value")
     ax_bar.set_xticks(x)
-    ax_bar.set_xticklabels(
-        summary_df["TeamCoach"],
-        rotation=60,
-        ha="right",
-        fontsize=6,
-    )
+    ax_bar.set_xticklabels(summary_df["TeamCoach"], rotation=90, fontsize=6)
+    ax_bar.legend(fontsize=8)
 
-    # set y-axis reasonably
-    ymax = 0.0
-    if len(players_vals) > 0:
-        ymax = max(ymax, float(players_vals.max()))
-    if len(rating_vals) > 0:
-        ymax = max(ymax, float(rating_vals.max()))
-    ax_bar.set_ylim(0, max(ymax * 1.2, 1.0))
-
-    ax_bar.set_ylabel("Value", fontsize=8)
-    ax_bar.legend(fontsize=7)
-
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
     pdf.savefig(fig)
     plt.close(fig)
 
