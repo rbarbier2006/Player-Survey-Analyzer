@@ -927,7 +927,12 @@ def _add_cycle_summary_page(
 
     x = np.arange(len(summary_df))
     width = 0.6
-    ax_bar.bar(x, summary_df["QQIndex"].values.astype(float), width=width, label="QQ index")
+    ax_bar.bar(
+        x,
+        summary_df["QQIndex"].values.astype(float),
+        width=width,
+        label="QQ index",
+    )
 
     ax_bar.set_ylabel("QQ index (rating × completion fraction)")
     ax_bar.set_xticks(x)
