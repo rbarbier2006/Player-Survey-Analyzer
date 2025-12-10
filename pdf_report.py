@@ -1015,15 +1015,16 @@ def create_pdf_from_original(
     df[group_col_name] = df[group_col_name].fillna("UNASSIGNED")
 
     # ------------------------------------------------------------------
-    # Build QQ index per team so we can order the team pages
+    # 1) Build stats for each team that actually has rows in the data
     # ------------------------------------------------------------------
     cols = list(df.columns)
     rating_indices = [idx for idx in RATING_COL_INDICES if idx < len(cols)]
     overall_idx = rating_indices[6] if len(rating_indices) >= 7 else None  # Q7
 
-    stats_by_team: Dict[str, Any] = {}
+    stats_rows: List[Dict[str, Any]] = {}
 
-    for group_value, group_df in df.groupby(group_col_name, sort=True):
+    stats_rows_list: List[Dict[str, Any]] = []
+    for group_value, group_df in df.groupby(group_col_name, sort=False):
         team_name = str(group_value).strip()
         if team_name == "UNASSIGNED":
             continue
@@ -1050,72 +1051,68 @@ def create_pdf_from_original(
         else:
             avg_q7 = np.nan
 
-        stats_by_team[team_name] = (n_players, avg_q7)
-
-    # Combine with TEAM_COACH_MAP so we have an entry for every team
-    all_team_names = sorted(set(stats_by_team.keys()) | set(TEAM_COACH_MAP.keys()))
-    rows: List[Dict[str, Any]] = []
-    for team_name in all_team_names:
-        coach_name = TEAM_COACH_MAP.get(team_name, "?")
-        players, avg_q7 = stats_by_team.get(team_name, (0, np.nan))
-        rows.append(
+        stats_rows_list.append(
             {
                 "Team": team_name,
-                "Coach": coach_name,
-                "Players": players,
+                "Players": n_players,
                 "OverallExp": avg_q7,
             }
         )
 
-    order_df = pd.DataFrame(rows)
+    if not stats_rows_list:
+        # No teams / no data – nothing to do
+        return output_path
 
-    # Compute QQ index for ordering
+    stats_df = pd.DataFrame(stats_rows_list)
+
+    # ------------------------------------------------------------------
+    # 2) Compute QQ index for each team for ordering
+    # ------------------------------------------------------------------
     qq_vals: List[float] = []
     for team, players, rating in zip(
-        order_df["Team"], order_df["Players"], order_df["OverallExp"]
+        stats_df["Team"], stats_df["Players"], stats_df["OverallExp"]
     ):
         roster = TEAM_ROSTER_SIZE.get(team)
         if roster is None or roster <= 0 or pd.isna(rating):
             qq_vals.append(0.0)
         else:
-            frac = players / float(roster)  # completion fraction
+            frac = players / float(roster)  # completion fraction (0–1)
             qq_vals.append(float(rating) * frac)
-    order_df["QQIndex"] = qq_vals
 
-    # Only teams that actually have survey data will have pages
-    order_df = order_df[order_df["Team"].isin(stats_by_team.keys())]
+    stats_df["QQIndex"] = qq_vals
 
-    # Teams sorted by QQ index (highest first)
-    qq_sorted_teams: List[str] = list(
-        order_df.sort_values("QQIndex", ascending=False)["Team"].values
-    )
+    # Order teams by QQ descending (highest first)
+    stats_df = stats_df.sort_values("QQIndex", ascending=False, ignore_index=True)
+    qq_sorted_teams: List[str] = list(stats_df["Team"].values)
 
-    # Pre-group dataframe by team for quick access
+    # ------------------------------------------------------------------
+    # 3) Pre-group dataframe by team for quick access
+    # ------------------------------------------------------------------
     grouped: Dict[str, pd.DataFrame] = {
         str(g).strip(): sub_df for g, sub_df in df.groupby(group_col_name, sort=False)
     }
 
     # ------------------------------------------------------------------
-    # Build the PDF
+    # 4) Build the PDF in the desired order
     # ------------------------------------------------------------------
     with PdfPages(output_path) as pdf:
-        # 1) Global summary page (table + QQ chart, unchanged)
+        # Global summary page (table + QQ chart)
         _add_cycle_summary_page(pdf, df, group_col_name, cycle_label)
 
-        # 2) All-teams combined pages
+        # All-teams combined pages
         all_meta = _build_plot_metadata(df)
         _add_group_charts_page_to_pdf(pdf, df, "All Teams", cycle_label, all_meta)
         _add_group_tables_page_to_pdf(
             pdf, df, "All Teams", cycle_label, all_meta, is_all_teams=True
         )
 
-        # 3) Individual team pages, ordered by QQ index
+        # Individual team pages in QQ order
         for team_name in qq_sorted_teams:
-            if team_name not in grouped:
-                # Should only happen for teams with zero responses
+            group_df = grouped.get(team_name)
+            if group_df is None:
+                # Should not happen, but just in case
                 continue
 
-            group_df = grouped[team_name]
             coach_name = TEAM_COACH_MAP.get(team_name, "?")
             title_label = f"{team_name} - {coach_name}"
 
