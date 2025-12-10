@@ -12,19 +12,19 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 # Mapping from team name -> coach name in the PDF titles :contentReference[oaicite:0]{index=0}
 TEAM_COACH_MAP = {
-    "MLS HG (T1) U19": "Jorge",
-    "MLS HG (T1) U17": "Chris",
-    "MLS HG (T1) U16": "David K",
-    "MLS HG (T1) U15": "Jorge",
-    "MLS HG (T1) U14": "David K",
-    "MLS HG (T1) U13": "Chris M",
+    "MLS HG U19": "Jorge",
+    "MLS HG U17": "Chris",
+    "MLS HG U16": "David K",
+    "MLS HG U15": "Jorge",
+    "MLS HG U14": "David K",
+    "MLS HG U13": "Chris M",
 
-    "MLS AD (T2) U19": "Michael",
-    "MLS AD (T2) U17": "Michael",
-    "MLS AD (T2) U16": "Miguel",
-    "MLS AD (T2) U15": "Miguel",
-    "MLS AD (T2) U14": "?",          # unknown coach
-    "MLS AD (T2) U13": "Miguel",
+    "MLS AD U19": "Michael",
+    "MLS AD U17": "Michael",
+    "MLS AD U16": "Miguel",
+    "MLS AD U15": "Miguel",
+    "MLS AD U14": "Junro",          # unknown coach
+    "MLS AD U13": "Miguel",
 
     "TX2 U19": "Jesus",
     "TX2 U17": "Fernando",
@@ -45,10 +45,10 @@ TEAM_COACH_MAP = {
     "WDDOA U12": "Adam",
     "WDDOA U11": "Adam",
 
-    "PDF White U10": "Steven",
-    "PDF White U9": "Steven",
-    "PDF Red U10": "Pablo",
-    "PDF Red U9": "Pablo",
+    "PDF U10 White": "Steven",
+    "PDF U9 White": "Steven",
+    "PDF U10 Red": "Pablo",
+    "PDF U9 Red": "Pablo",
 }
 
 
