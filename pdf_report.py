@@ -877,6 +877,14 @@ def _add_cycle_summary_page(
 
     summary_df = pd.DataFrame(rows)
 
+    # Total number of players who completed the survey (across all teams)
+    total_players = int(summary_df["Players"].sum())
+    if total_players == 1:
+        total_players_str = "1 player"
+    else:
+        total_players_str = f"{total_players} players"
+
+
     # Rank: more players first, then higher Overall Experience
     summary_df = summary_df.sort_values(
         by=["Players", "OverallExp"],
@@ -949,7 +957,11 @@ def _add_cycle_summary_page(
 
     summary_df["QQIndex"] = qq_vals
 
-    ax_bar.set_title(f"{cycle_label} QQ (Quality Quantity) Index", fontsize=10)
+    ax_bar.set_title(
+    f"{cycle_label} QQ (Quality Quantity) Index - {total_players_str}",
+    fontsize=10,
+    )
+
 
     y_pos = np.arange(len(summary_df))
     ax_bar.barh(
