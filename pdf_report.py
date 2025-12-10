@@ -846,7 +846,7 @@ def _add_cycle_summary_page(
             }
         )
 
-        summary_df = pd.DataFrame(summary_rows)
+    summary_df = pd.DataFrame(summary_rows)
 
     # Rank: more players first, then higher Overall Experience
     summary_df = summary_df.sort_values(
@@ -924,6 +924,7 @@ def _add_cycle_summary_page(
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     pdf.savefig(fig)
     plt.close(fig)
+
 
 
 
