@@ -923,7 +923,7 @@ def _add_cycle_summary_page(
 
     summary_df["QQIndex"] = qq_vals
 
-    ax_bar.set_title(f"{cycle_label} QQ Index", fontsize=10)
+    ax_bar.set_title(f"{cycle_label} QQ (Quality Quantity) Index", fontsize=10)
 
     x = np.arange(len(summary_df))
     width = 0.6
