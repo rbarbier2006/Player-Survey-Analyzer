@@ -828,7 +828,6 @@ def _add_cycle_summary_page(
         stats_by_team[team_name] = (n_players, avg_q7)
 
     # ---- 2) Build rows for ALL teams (data + no-response teams) ----
-    # union of teams in the data and in TEAM_COACH_MAP
     all_team_names = sorted(set(stats_by_team.keys()) | set(TEAM_COACH_MAP.keys()))
     if not all_team_names:
         return
@@ -840,13 +839,14 @@ def _add_cycle_summary_page(
 
         rows.append(
             {
-                "TeamCoach": f"{team_name} - {coach_name}",
+                "Team": team_name,
+                "Coach": coach_name,
                 "Players": players,
-                "Rating": avg_q7,
+                "OverallExp": avg_q7,
             }
         )
 
-    summary_df = pd.DataFrame(summary_rows)
+    summary_df = pd.DataFrame(rows)
 
     # Rank: more players first, then higher Overall Experience
     summary_df = summary_df.sort_values(
@@ -864,9 +864,9 @@ def _add_cycle_summary_page(
         lambda v: "" if pd.isna(v) else f"{v:.2f}"
     )
 
-    # Text version of players: "<count> (<pct>%)" if roster is known
+    # Text version of players: uses TEAM_ROSTER_SIZE via _format_players_cell
     summary_df["PlayersDisplay"] = [
-        _format_players_cell(team, players)
+        _format_players_cell(team, int(players))
         for team, players in zip(summary_df["Team"], summary_df["Players"])
     ]
 
@@ -889,13 +889,13 @@ def _add_cycle_summary_page(
         cellText=display_df.values,
         colLabels=["Team - Coach", "Players", "Rating"],
         loc="center",
-        colWidths=[0.7, 0.15, 0.15],  # wide first col, thin numeric cols
+        colWidths=[0.72, 0.14, 0.14],  # wide first col, thin numeric cols
     )
     table.auto_set_font_size(False)
     table.set_fontsize(7)
     table.scale(1.1, 1.1)
 
-    # Optional nicer alignment
+    # Header vs body alignment
     for (r, c), cell in table.get_celld().items():
         if r == 0:
             cell.set_text_props(ha="center", va="center", fontweight="bold")
@@ -905,12 +905,12 @@ def _add_cycle_summary_page(
             else:
                 cell.set_text_props(ha="center", va="center")
 
-    # Right: bar chart (still uses raw numeric counts and ratings)
+    # Right: bar chart (raw numeric counts and ratings)
     ax_bar.set_title(f"{cycle_label} Players/Ratings", fontsize=10)
 
     x = np.arange(len(summary_df))
-    players_vals = summary_df["Players"].values
-    rating_vals = summary_df["Rating"].fillna(0.0).values
+    players_vals = summary_df["Players"].values.astype(float)
+    rating_vals = summary_df["Rating"].fillna(0.0).values.astype(float)
 
     width = 0.35
     ax_bar.bar(x - width / 2, players_vals, width=width, label="Players")
