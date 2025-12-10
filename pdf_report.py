@@ -958,7 +958,7 @@ def _add_cycle_summary_page(
     summary_df["QQIndex"] = qq_vals
 
     ax_bar.set_title(
-    f"{cycle_label} QQ (Quality Quantity) Index - {total_players_str}",
+    f"{cycle_label} QQ (Quality-Quantity) Index - {total_players_str}",
     fontsize=10,
     )
 
