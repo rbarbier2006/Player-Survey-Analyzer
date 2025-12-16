@@ -10,8 +10,12 @@ import matplotlib.pyplot as plt
 import re
 from matplotlib.backends.backend_pdf import PdfPages
 
-# Mapping from team name -> coach name in the PDF titles :contentReference[oaicite:0]{index=0}
-TEAM_COACH_MAP = {
+# ---------------------------------------------------------------------
+#  Team / coach metadata
+# ---------------------------------------------------------------------
+
+# Mapping from team name -> coach name in the PDF titles
+TEAM_COACH_MAP: Dict[str, str] = {
     "MLS HG U19": "Jorge",
     "MLS HG U17": "Chris",
     "MLS HG U16": "David K",
@@ -23,7 +27,7 @@ TEAM_COACH_MAP = {
     "MLS AD U17": "Michael",
     "MLS AD U16": "Miguel",
     "MLS AD U15": "Miguel",
-    "MLS AD U14": "Junro",          # unknown coach
+    "MLS AD U14": "Junro",      # unknown coach
     "MLS AD U13": "Miguel",
 
     "TX2 U19": "Jesus",
@@ -51,7 +55,7 @@ TEAM_COACH_MAP = {
     "PDF U9 Red": "Pablo",
 }
 
-# Total roster size per team (fill these in with your real numbers)
+# Total roster size per team (used for percentages & QQ index)
 TEAM_ROSTER_SIZE: Dict[str, int] = {
     "MLS HG U19": 19,
     "MLS HG U17": 19,
@@ -64,7 +68,7 @@ TEAM_ROSTER_SIZE: Dict[str, int] = {
     "MLS AD U17": 17,
     "MLS AD U16": 19,
     "MLS AD U15": 18,
-    "MLS AD U14": 19,          # unknown coach
+    "MLS AD U14": 19,
     "MLS AD U13": 15,
 
     "TX2 U19": 14,
@@ -93,7 +97,7 @@ TEAM_ROSTER_SIZE: Dict[str, int] = {
 }
 
 # Mapping from chart number -> pretty label used in PDF tables
-CHART_LABELS = {
+CHART_LABELS: Dict[int, str] = {
     1: "(1)Safety and Support",
     2: "(2)Improvement",
     3: "(3)Instructions and Feedback",
@@ -104,6 +108,26 @@ CHART_LABELS = {
     8: "(8)Team Belonging",
     9: "(9)Cycle Enjoyment",
 }
+
+# ---------------------------------------------------------------------
+#  Column index helpers imported from excel_processor
+# ---------------------------------------------------------------------
+
+from excel_processor import (
+    PLAYER_NAME_INDEX,
+    RATING_COL_INDICES,
+    YESNO_COL_INDICES,
+    CHOICE_COL_INDEX,
+    GROUP_COL_INDEX,
+    build_low_ratings_table,
+    build_no_answers_table,
+    build_choice_counts,
+)
+
+# ---------------------------------------------------------------------
+#  Title helpers
+# ---------------------------------------------------------------------
+
 
 def _compose_group_title(title_label: str, cycle_label: str) -> str:
     """
@@ -128,16 +152,9 @@ def _compose_group_title(title_label: str, cycle_label: str) -> str:
     return f"{base} - {coach} - {cycle_label}"
 
 
-from excel_processor import (
-    PLAYER_NAME_INDEX,
-    RATING_COL_INDICES,
-    YESNO_COL_INDICES,
-    CHOICE_COL_INDEX,
-    GROUP_COL_INDEX,
-    build_low_ratings_table,
-    build_no_answers_table,
-    build_choice_counts,
-)
+# ---------------------------------------------------------------------
+#  Plot metadata
+# ---------------------------------------------------------------------
 
 
 def _build_plot_metadata(df_group: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -188,6 +205,11 @@ def _build_plot_metadata(df_group: pd.DataFrame) -> List[Dict[str, Any]]:
         )
 
     return meta
+
+
+# ---------------------------------------------------------------------
+#  Group charts page (page 1 per group)
+# ---------------------------------------------------------------------
 
 
 def _add_group_charts_page_to_pdf(
@@ -353,6 +375,11 @@ def _add_group_charts_page_to_pdf(
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------
+#  Players grid
+# ---------------------------------------------------------------------
+
+
 def _build_all_players_grid(
     df_group: pd.DataFrame,
     max_cols: int = 6,
@@ -398,6 +425,11 @@ def _build_all_players_grid(
     return players_df
 
 
+# ---------------------------------------------------------------------
+#  Comments table
+# ---------------------------------------------------------------------
+
+
 def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
     Build a table with all free-text comments/suggestions for this group.
@@ -405,6 +437,10 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
     It looks for any column whose header contains 'comment' or 'suggest'
     (case-insensitive). For each non-empty cell in those columns, we
     create a row: Player | Comment / Suggestion.
+
+    NOTE: We do NOT manually wrap the text here. Wrapping is handled
+    by matplotlib's table cell (set_wrap(True)) so it uses the real
+    pixel width of the column.
     """
     if PLAYER_NAME_INDEX >= len(df_group.columns):
         return None
@@ -446,12 +482,13 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
         return None
 
     comments_df = pd.DataFrame(rows, columns=["Player", "Comment / Suggestion"])
-
-    comments_df["Comment / Suggestion"] = comments_df[
-        "Comment / Suggestion"
-    ].apply(lambda s: textwrap.fill(str(s), width=70))
-
     return comments_df
+
+
+# ---------------------------------------------------------------------
+#  Low-ratings filter
+# ---------------------------------------------------------------------
+
 
 def _filter_low_df_by_max_star(low_df: pd.DataFrame, max_star: int = 2) -> pd.DataFrame:
     """
@@ -488,6 +525,11 @@ def _filter_low_df_by_max_star(low_df: pd.DataFrame, max_star: int = 2) -> pd.Da
         new_cols[col] = vals + [""] * (max_len - len(vals))
 
     return pd.DataFrame(new_cols)
+
+
+# ---------------------------------------------------------------------
+#  Group tables page (page 2 per group)
+# ---------------------------------------------------------------------
 
 
 def _add_group_tables_page_to_pdf(
@@ -645,7 +687,7 @@ def _add_group_tables_page_to_pdf(
         elif s == "players":
             height_ratios.append(1.3)
         elif s == "comments":
-            height_ratios.append(1.6)
+            height_ratios.append(1.8)
 
     fig, axes = plt.subplots(
         nrows=nrows,
@@ -755,23 +797,27 @@ def _add_group_tables_page_to_pdf(
             cellText=comments_df.values,
             colLabels=comments_df.columns,
             loc="upper left",
-            colWidths=[0.15, 0.85],
+            colWidths=[0.12, 0.88],  # 12% name, 88% comment
         )
         table.auto_set_font_size(False)
         table.set_fontsize(8)
-        table.scale(1.0, 2.0)
+        table.scale(1.05, 1.6)  # slightly taller rows for wrapped text
 
         for (r, c), cell in table.get_celld().items():
             if r == 0:
-                cell.set_text_props(ha="center", va="center")
+                # header row
+                cell.set_text_props(ha="center", va="center", fontweight="bold")
                 continue
+
             if c == 0:
-                cell.set_text_props(ha="center", va="center")
+                # player name
+                cell.set_text_props(ha="center", va="top")
             elif c == 1:
+                # comment: top-left + wrap
                 txt = cell.get_text()
-                txt.set_ha("left")
-                txt.set_va("center")
                 txt.set_wrap(True)
+                txt.set_ha("left")
+                txt.set_va("top")
                 cell.PAD = 0.02
 
         ax.set_title("Comments and Suggestions", fontsize=10, pad=6)
@@ -783,6 +829,12 @@ def _add_group_tables_page_to_pdf(
 
     pdf.savefig(fig)
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------
+#  Helper: players column formatting for summary table
+# ---------------------------------------------------------------------
+
 
 def _format_players_cell(team_name: str, players: int) -> str:
     """
@@ -797,6 +849,11 @@ def _format_players_cell(team_name: str, players: int) -> str:
 
     pct = (players / total) * 100.0
     return f"{players} ({pct:.0f}%)"
+
+
+# ---------------------------------------------------------------------
+#  Cycle summary page (page 1 of PDF)
+# ---------------------------------------------------------------------
 
 
 def _add_cycle_summary_page(
@@ -884,7 +941,6 @@ def _add_cycle_summary_page(
     else:
         total_players_str = f"{total_players} players"
 
-
     # Rank: more players first, then higher Overall Experience
     summary_df = summary_df.sort_values(
         by=["Players", "OverallExp"],
@@ -958,10 +1014,9 @@ def _add_cycle_summary_page(
     summary_df["QQIndex"] = qq_vals
 
     ax_bar.set_title(
-    f"{cycle_label} QQ (Quality-Quantity) Index - {total_players_str}",
-    fontsize=10,
+        f"{cycle_label} QQ (Quality-Quantity) Index - {total_players_str}",
+        fontsize=10,
     )
-
 
     y_pos = np.arange(len(summary_df))
     ax_bar.barh(
@@ -981,6 +1036,11 @@ def _add_cycle_summary_page(
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     pdf.savefig(fig)
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------
+#  Main entry: build entire PDF
+# ---------------------------------------------------------------------
 
 
 def create_pdf_from_original(
@@ -1015,17 +1075,12 @@ def create_pdf_from_original(
     df[group_col_name] = df[group_col_name].fillna("UNASSIGNED")
 
     # ------------------------------------------------------------------
-    # Build QQ index per team so we can order the team pages
     # 1) Build stats for each team that actually has rows in the data
     # ------------------------------------------------------------------
     cols = list(df.columns)
     rating_indices = [idx for idx in RATING_COL_INDICES if idx < len(cols)]
     overall_idx = rating_indices[6] if len(rating_indices) >= 7 else None  # Q7
 
-    stats_by_team: Dict[str, Any] = {}
-    stats_rows: List[Dict[str, Any]] = {}
-
-    for group_value, group_df in df.groupby(group_col_name, sort=True):
     stats_rows_list: List[Dict[str, Any]] = []
     for group_value, group_df in df.groupby(group_col_name, sort=False):
         team_name = str(group_value).strip()
@@ -1054,31 +1109,18 @@ def create_pdf_from_original(
         else:
             avg_q7 = np.nan
 
-        stats_by_team[team_name] = (n_players, avg_q7)
-
-    # Combine with TEAM_COACH_MAP so we have an entry for every team
-    all_team_names = sorted(set(stats_by_team.keys()) | set(TEAM_COACH_MAP.keys()))
-    rows: List[Dict[str, Any]] = []
-    for team_name in all_team_names:
-        coach_name = TEAM_COACH_MAP.get(team_name, "?")
-        players, avg_q7 = stats_by_team.get(team_name, (0, np.nan))
-        rows.append(
         stats_rows_list.append(
             {
                 "Team": team_name,
-                "Coach": coach_name,
-                "Players": players,
                 "Players": n_players,
                 "OverallExp": avg_q7,
             }
         )
 
-    order_df = pd.DataFrame(rows)
     if not stats_rows_list:
         # No teams / no data – nothing to do
         return output_path
 
-    # Compute QQ index for ordering
     stats_df = pd.DataFrame(stats_rows_list)
 
     # ------------------------------------------------------------------
@@ -1086,31 +1128,21 @@ def create_pdf_from_original(
     # ------------------------------------------------------------------
     qq_vals: List[float] = []
     for team, players, rating in zip(
-        order_df["Team"], order_df["Players"], order_df["OverallExp"]
         stats_df["Team"], stats_df["Players"], stats_df["OverallExp"]
     ):
         roster = TEAM_ROSTER_SIZE.get(team)
         if roster is None or roster <= 0 or pd.isna(rating):
             qq_vals.append(0.0)
         else:
-            frac = players / float(roster)  # completion fraction
             frac = players / float(roster)  # completion fraction (0–1)
             qq_vals.append(float(rating) * frac)
-    order_df["QQIndex"] = qq_vals
 
-    # Only teams that actually have survey data will have pages
-    order_df = order_df[order_df["Team"].isin(stats_by_team.keys())]
     stats_df["QQIndex"] = qq_vals
 
-    # Teams sorted by QQ index (highest first)
-    qq_sorted_teams: List[str] = list(
-        order_df.sort_values("QQIndex", ascending=False)["Team"].values
-    )
     # Order teams by QQ descending (highest first)
     stats_df = stats_df.sort_values("QQIndex", ascending=False, ignore_index=True)
     qq_sorted_teams: List[str] = list(stats_df["Team"].values)
 
-    # Pre-group dataframe by team for quick access
     # ------------------------------------------------------------------
     # 3) Pre-group dataframe by team for quick access
     # ------------------------------------------------------------------
@@ -1119,15 +1151,12 @@ def create_pdf_from_original(
     }
 
     # ------------------------------------------------------------------
-    # Build the PDF
     # 4) Build the PDF in the desired order
     # ------------------------------------------------------------------
     with PdfPages(output_path) as pdf:
-        # 1) Global summary page (table + QQ chart, unchanged)
         # Global summary page (table + QQ chart)
         _add_cycle_summary_page(pdf, df, group_col_name, cycle_label)
 
-        # 2) All-teams combined pages
         # All-teams combined pages
         all_meta = _build_plot_metadata(df)
         _add_group_charts_page_to_pdf(pdf, df, "All Teams", cycle_label, all_meta)
@@ -1135,17 +1164,13 @@ def create_pdf_from_original(
             pdf, df, "All Teams", cycle_label, all_meta, is_all_teams=True
         )
 
-        # 3) Individual team pages, ordered by QQ index
         # Individual team pages in QQ order
         for team_name in qq_sorted_teams:
-            if team_name not in grouped:
-                # Should only happen for teams with zero responses
             group_df = grouped.get(team_name)
             if group_df is None:
                 # Should not happen, but just in case
                 continue
 
-            group_df = grouped[team_name]
             coach_name = TEAM_COACH_MAP.get(team_name, "?")
             title_label = f"{team_name} - {coach_name}"
 
