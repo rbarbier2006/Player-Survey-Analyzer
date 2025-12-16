@@ -687,7 +687,7 @@ def _add_group_tables_page_to_pdf(
         elif s == "players":
             height_ratios.append(1.3)
         elif s == "comments":
-            height_ratios.append(1.8)
+            height_ratios.append(1.3)
 
     fig, axes = plt.subplots(
         nrows=nrows,
