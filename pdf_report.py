@@ -405,6 +405,10 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
     It looks for any column whose header contains 'comment' or 'suggest'
     (case-insensitive). For each non-empty cell in those columns, we
     create a row: Player | Comment / Suggestion.
+
+    NOTE: We do NOT manually wrap the text here. Wrapping is handled
+    by matplotlib's table cell (set_wrap(True)) so it uses the real
+    pixel width of the column.
     """
     if PLAYER_NAME_INDEX >= len(df_group.columns):
         return None
@@ -446,12 +450,8 @@ def _build_comments_table(df_group: pd.DataFrame) -> Optional[pd.DataFrame]:
         return None
 
     comments_df = pd.DataFrame(rows, columns=["Player", "Comment / Suggestion"])
-
-    comments_df["Comment / Suggestion"] = comments_df[
-        "Comment / Suggestion"
-    ].apply(lambda s: textwrap.fill(str(s), width=70))
-
     return comments_df
+
 
 def _filter_low_df_by_max_star(low_df: pd.DataFrame, max_star: int = 2) -> pd.DataFrame:
     """
@@ -645,7 +645,7 @@ def _add_group_tables_page_to_pdf(
         elif s == "players":
             height_ratios.append(1.3)
         elif s == "comments":
-            height_ratios.append(1.6)
+            height_ratios.append(1.8)
 
     fig, axes = plt.subplots(
         nrows=nrows,
@@ -751,18 +751,17 @@ def _add_group_tables_page_to_pdf(
         ax = axes[row_idx]
         ax.axis("off")
 
-        # Wider comment column, slightly narrower player column
+        # Give the comment column almost all the width
         table = ax.table(
             cellText=comments_df.values,
             colLabels=comments_df.columns,
             loc="upper left",
-            colWidths=[0.12, 0.88],  # 12% name, 88% comment text
+            colWidths=[0.12, 0.88],  # 12% name, 88% comment
         )
         table.auto_set_font_size(False)
         table.set_fontsize(8)
-
-        # Make rows much taller so multi-line text fits
-        table.scale(1.0, 3.0)
+        # Slight vertical stretch so wrapped text has room
+        table.scale(1.05, 1.6)
 
         for (r, c), cell in table.get_celld().items():
             if r == 0:
@@ -771,26 +770,18 @@ def _add_group_tables_page_to_pdf(
                 continue
 
             if c == 0:
-                # player name centered
-                cell.set_text_props(ha="center", va="center")
+                # player name column
+                cell.set_text_props(ha="center", va="top")
             elif c == 1:
-                # comment text: left aligned, top of cell
+                # comment column: top-left, auto-wrap inside cell bounds
                 txt = cell.get_text()
+                txt.set_wrap(True)
                 txt.set_ha("left")
                 txt.set_va("top")
-                # we already inserted "\n" with textwrap.fill, so no extra wrapping
-                # txt.set_wrap(True)  # not needed; can cause overlap
-                cell.PAD = 0.05
+                cell.PAD = 0.02
 
         ax.set_title("Comments and Suggestions", fontsize=10, pad=6)
 
-    full_title = _compose_group_title(title_label, cycle_label) + n_text + " (Details)"
-    fig.suptitle(full_title, fontsize=12)
-    fig.tight_layout(rect=[0, 0.03, 1, 0.9])
-    fig.subplots_adjust(hspace=0.55)
-
-    pdf.savefig(fig)
-    plt.close(fig)
 
 def _format_players_cell(team_name: str, players: int) -> str:
     """
