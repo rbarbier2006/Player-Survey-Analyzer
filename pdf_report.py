@@ -746,33 +746,41 @@ def _add_group_tables_page_to_pdf(
         ax.set_title("Players who completed this survey", fontsize=10, pad=4)
         row_idx += 1
 
-    # Comments / Suggestions (team pages)
+        # Comments / Suggestions (team pages)
     if not is_all_teams and comments_df is not None:
         ax = axes[row_idx]
         ax.axis("off")
 
+        # Wider comment column, slightly narrower player column
         table = ax.table(
             cellText=comments_df.values,
             colLabels=comments_df.columns,
             loc="upper left",
-            colWidths=[0.15, 0.85],
+            colWidths=[0.12, 0.88],  # 12% name, 88% comment text
         )
         table.auto_set_font_size(False)
         table.set_fontsize(8)
-        table.scale(1.0, 2.0)
+
+        # Make rows much taller so multi-line text fits
+        table.scale(1.0, 3.0)
 
         for (r, c), cell in table.get_celld().items():
             if r == 0:
-                cell.set_text_props(ha="center", va="center")
+                # header row
+                cell.set_text_props(ha="center", va="center", fontweight="bold")
                 continue
+
             if c == 0:
+                # player name centered
                 cell.set_text_props(ha="center", va="center")
             elif c == 1:
+                # comment text: left aligned, top of cell
                 txt = cell.get_text()
                 txt.set_ha("left")
-                txt.set_va("center")
-                txt.set_wrap(True)
-                cell.PAD = 0.02
+                txt.set_va("top")
+                # we already inserted "\n" with textwrap.fill, so no extra wrapping
+                # txt.set_wrap(True)  # not needed; can cause overlap
+                cell.PAD = 0.05
 
         ax.set_title("Comments and Suggestions", fontsize=10, pad=6)
 
