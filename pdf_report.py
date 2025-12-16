@@ -489,6 +489,7 @@ def _add_group_tables_page_to_pdf(
     pdf.savefig(fig)
     plt.close(fig)
 
+
 def _build_all_players_grid(
     df_group: pd.DataFrame,
     max_cols: int = 6,
