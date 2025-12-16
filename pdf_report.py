@@ -801,7 +801,7 @@ def _add_group_tables_page_to_pdf(
         )
         table.auto_set_font_size(False)
         table.set_fontsize(8)
-        table.scale(1.05, 2.0)  # slightly taller rows for wrapped text
+        table.scale(1.05, 1.0)  # slightly taller rows for wrapped text
 
         for (r, c), cell in table.get_celld().items():
             if r == 0:
